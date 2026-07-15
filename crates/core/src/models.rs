@@ -41,6 +41,19 @@ pub struct Operator {
     pub created_at: i64,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Rule {
+    pub id: String,
+    pub name: String,
+    pub metric: String,
+    pub op: String,
+    pub threshold: f64,
+    pub severity: String,
+    pub enabled: bool,
+    pub created_at: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Alert {

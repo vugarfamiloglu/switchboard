@@ -14,6 +14,7 @@ use serde_json::json;
 use crate::auth::now;
 use crate::db::Db;
 use crate::live::{Aggregate, DeviceLive, Live};
+use crate::models::Rule;
 use crate::ws::Hub;
 
 const TICK: Duration = Duration::from_secs(2);
@@ -51,7 +52,14 @@ impl DevSim {
     fn new(id: String, model: &str, tags: &str, rng: &mut impl Rng) -> Self {
         let (metrics, base) = seed_metrics(&profile_for(model), rng);
         let (lat, lng) = seed_position(tags, rng);
-        Self { id, metrics, base, online: true, lat, lng }
+        Self {
+            id,
+            metrics,
+            base,
+            online: true,
+            lat,
+            lng,
+        }
     }
 
     fn tick(&mut self, rng: &mut impl Rng) {
@@ -90,21 +98,32 @@ impl DevSim {
         false
     }
 
-    /// The active fault conditions (severity, title, detail) driving alerts.
-    fn fault_conditions(&self) -> Vec<(&'static str, &'static str, String)> {
-        let mut v = Vec::new();
+    /// The active fault conditions (severity, title, detail) driving alerts:
+    /// the built-in offline check plus every enabled user rule.
+    fn fault_conditions(&self, rules: &[Rule]) -> Vec<(String, String, String)> {
         if !self.online {
-            v.push(("critical", "Device offline", "No telemetry received from the device.".to_string()));
-            return v;
+            return vec![(
+                "critical".to_string(),
+                "Device offline".to_string(),
+                "No telemetry received from the device.".to_string(),
+            )];
         }
-        if let Some(t) = self.metrics.get("tempC") {
-            if *t > 30.0 {
-                v.push(("warning", "High temperature", format!("Temperature {:.1} C exceeds the 30 C threshold.", t)));
-            }
-        }
-        if let Some(b) = self.metrics.get("batteryPct") {
-            if *b < 15.0 {
-                v.push(("warning", "Low battery", format!("Battery at {:.0}% (below 15%).", b)));
+        let mut v = Vec::new();
+        for r in rules {
+            if let Some(val) = self.metrics.get(&r.metric) {
+                let hit = match r.op.as_str() {
+                    "gt" => *val > r.threshold,
+                    "lt" => *val < r.threshold,
+                    _ => false,
+                };
+                if hit {
+                    let sign = if r.op == "gt" { ">" } else { "<" };
+                    v.push((
+                        r.severity.clone(),
+                        r.name.clone(),
+                        format!("{} {} {} (now {:.1})", r.metric, sign, r.threshold, val),
+                    ));
+                }
             }
         }
         v
@@ -118,7 +137,11 @@ impl DevSim {
             .collect();
         metrics.insert("lat".into(), (self.lat * 10000.0).round() / 10000.0);
         metrics.insert("lng".into(), (self.lng * 10000.0).round() / 10000.0);
-        DeviceLive { online: self.online, last_seen: ts, metrics }
+        DeviceLive {
+            online: self.online,
+            last_seen: ts,
+            metrics,
+        }
     }
 }
 
@@ -158,7 +181,10 @@ fn seed_position(tags: &str, rng: &mut impl Rng) -> (f64, f64) {
     } else {
         (40.40, 49.87) // Baku
     };
-    (blat + rng.gen_range(-0.08..0.08), blng + rng.gen_range(-0.10..0.10))
+    (
+        blat + rng.gen_range(-0.08..0.08),
+        blng + rng.gen_range(-0.10..0.10),
+    )
 }
 
 #[cfg(test)]
@@ -205,13 +231,19 @@ fn command_result(name: &str) -> (&'static str, String) {
 
 fn log_line(s: &DevSim, rng: &mut impl Rng) -> (&'static str, String) {
     if !s.online {
-        return ("error", "Connection lost — no heartbeat within the keepalive window".into());
+        return (
+            "error",
+            "Connection lost — no heartbeat within the keepalive window".into(),
+        );
     }
     let roll = rng.gen_range(0.0..1.0);
     if roll < 0.07 {
         ("warning", "RSSI degraded — backing off publish rate".into())
     } else if roll < 0.10 {
-        ("error", "Publish acknowledgement timed out, retrying".into())
+        (
+            "error",
+            "Publish acknowledgement timed out, retrying".into(),
+        )
     } else {
         const INFO: &[&str] = &[
             "Telemetry batch published",
@@ -241,8 +273,10 @@ impl Sim {
 
     async fn run(self) {
         let devices = self.db.list_devices();
-        let names: HashMap<String, String> =
-            devices.iter().map(|d| (d.id.clone(), d.name.clone())).collect();
+        let names: HashMap<String, String> = devices
+            .iter()
+            .map(|d| (d.id.clone(), d.name.clone()))
+            .collect();
         let mut sims: Vec<DevSim> = {
             let mut rng = rand::thread_rng();
             devices
@@ -307,7 +341,11 @@ impl Sim {
 
             // Fulfil pending commands (a device responds unless it is offline).
             for (id, device, name) in self.db.list_pending_commands() {
-                let online = sims.iter().find(|s| s.id == device).map(|s| s.online).unwrap_or(false);
+                let online = sims
+                    .iter()
+                    .find(|s| s.id == device)
+                    .map(|s| s.online)
+                    .unwrap_or(false);
                 let (status, result) = if online {
                     command_result(&name)
                 } else {
@@ -321,7 +359,8 @@ impl Sim {
 
             if tick_no % TOUCH_EVERY == 0 {
                 for s in sims.iter().filter(|s| s.online) {
-                    let reported = serde_json::to_string(&s.metrics).unwrap_or_else(|_| "{}".into());
+                    let reported =
+                        serde_json::to_string(&s.metrics).unwrap_or_else(|_| "{}".into());
                     let _ = self.db.touch_device(&s.id, &reported, ts);
                 }
             }
@@ -338,15 +377,18 @@ impl Sim {
     /// has cleared. Deduplicated on (device, title) so an open alert isn't
     /// re-raised each cycle.
     fn evaluate_alerts(&self, sims: &[DevSim], now: i64) {
+        let rules = self.db.list_enabled_rules();
         for s in sims {
-            let conds = s.fault_conditions();
+            let conds = s.fault_conditions(&rules);
             for (severity, title, detail) in &conds {
                 if !self.db.open_alert_exists(&s.id, title) {
                     let id = format!("alr_{}", ulid::Ulid::new().to_string().to_lowercase());
-                    let _ = self.db.insert_alert(&id, &s.id, severity, title, detail, now);
+                    let _ = self
+                        .db
+                        .insert_alert(&id, &s.id, severity, title, detail, now);
                 }
             }
-            let active: Vec<&str> = conds.iter().map(|c| c.1).collect();
+            let active: Vec<&str> = conds.iter().map(|c| c.1.as_str()).collect();
             for (id, title) in self.db.open_alerts_for(&s.id) {
                 if !active.contains(&title.as_str()) {
                     let _ = self.db.set_alert_state(&id, "resolved", now);

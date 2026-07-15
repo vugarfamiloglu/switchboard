@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
     })?;
     ensure_operators(&db)?;
     ensure_demo_estate(&db)?;
+    ensure_rules(&db)?;
     tracing::info!(
         "database ready at {} · {} operators · {} devices",
         cfg.db_path(),
@@ -109,10 +110,30 @@ fn ensure_operators(db: &Db) -> anyhow::Result<()> {
     let hash = auth::hash_passcode(DEFAULT_PASSCODE)?;
     let now = auth::now();
     let seed = [
-        ("op_owner", "Aygun Mammadova", "owner@switchboard.local", "owner"),
-        ("op_admin", "Rashad Guliyev", "admin@switchboard.local", "admin"),
-        ("op_operator", "Kamran Aliyev", "operator@switchboard.local", "operator"),
-        ("op_viewer", "Nigar Sadigova", "viewer@switchboard.local", "viewer"),
+        (
+            "op_owner",
+            "Aygun Mammadova",
+            "owner@switchboard.local",
+            "owner",
+        ),
+        (
+            "op_admin",
+            "Rashad Guliyev",
+            "admin@switchboard.local",
+            "admin",
+        ),
+        (
+            "op_operator",
+            "Kamran Aliyev",
+            "operator@switchboard.local",
+            "operator",
+        ),
+        (
+            "op_viewer",
+            "Nigar Sadigova",
+            "viewer@switchboard.local",
+            "viewer",
+        ),
     ];
     for (id, name, email, role) in seed {
         db.insert_operator(id, name, email, role, &hash, now)?;
@@ -127,7 +148,11 @@ fn ensure_demo_estate(db: &Db) -> anyhow::Result<()> {
     }
     let now = auth::now();
     let fleets = [
-        ("flt_hvac", "HVAC Controllers", "Building climate controllers"),
+        (
+            "flt_hvac",
+            "HVAC Controllers",
+            "Building climate controllers",
+        ),
         ("flt_meters", "Smart Meters", "Grid and water meters"),
         ("flt_trackers", "Asset Trackers", "Fleet GPS trackers"),
     ];
@@ -135,25 +160,145 @@ fn ensure_demo_estate(db: &Db) -> anyhow::Result<()> {
         db.create_fleet(id, name, desc, now)?;
     }
     let devices = [
-        ("Rooftop AHU-01", "AeroTherm X3", "2.4.1", "flt_hvac", "baku,rooftop"),
-        ("Rooftop AHU-02", "AeroTherm X3", "2.4.1", "flt_hvac", "baku,rooftop"),
-        ("Chiller Plant-A", "AeroTherm C9", "3.1.0", "flt_hvac", "baku,plant"),
-        ("Chiller Plant-B", "AeroTherm C9", "3.0.7", "flt_hvac", "ganja,plant"),
-        ("Boiler Room-1", "AeroTherm B2", "1.9.4", "flt_hvac", "sumqayit"),
-        ("Grid Meter-4471", "VoltEdge M1", "5.2.0", "flt_meters", "baku,grid"),
-        ("Grid Meter-4472", "VoltEdge M1", "5.2.0", "flt_meters", "baku,grid"),
-        ("Water Meter-118", "AquaPulse W2", "2.0.3", "flt_meters", "ganja,water"),
-        ("Water Meter-119", "AquaPulse W2", "2.0.3", "flt_meters", "ganja,water"),
-        ("Substation Meter-7", "VoltEdge M3", "5.4.1", "flt_meters", "sumqayit,grid"),
-        ("Tracker Truck-12", "PathTag T4", "4.0.2", "flt_trackers", "fleet,truck"),
-        ("Tracker Truck-19", "PathTag T4", "4.0.2", "flt_trackers", "fleet,truck"),
-        ("Tracker Van-03", "PathTag T4", "4.0.1", "flt_trackers", "fleet,van"),
-        ("Tracker Reefer-08", "PathTag T7", "4.3.0", "flt_trackers", "fleet,reefer"),
+        (
+            "Rooftop AHU-01",
+            "AeroTherm X3",
+            "2.4.1",
+            "flt_hvac",
+            "baku,rooftop",
+        ),
+        (
+            "Rooftop AHU-02",
+            "AeroTherm X3",
+            "2.4.1",
+            "flt_hvac",
+            "baku,rooftop",
+        ),
+        (
+            "Chiller Plant-A",
+            "AeroTherm C9",
+            "3.1.0",
+            "flt_hvac",
+            "baku,plant",
+        ),
+        (
+            "Chiller Plant-B",
+            "AeroTherm C9",
+            "3.0.7",
+            "flt_hvac",
+            "ganja,plant",
+        ),
+        (
+            "Boiler Room-1",
+            "AeroTherm B2",
+            "1.9.4",
+            "flt_hvac",
+            "sumqayit",
+        ),
+        (
+            "Grid Meter-4471",
+            "VoltEdge M1",
+            "5.2.0",
+            "flt_meters",
+            "baku,grid",
+        ),
+        (
+            "Grid Meter-4472",
+            "VoltEdge M1",
+            "5.2.0",
+            "flt_meters",
+            "baku,grid",
+        ),
+        (
+            "Water Meter-118",
+            "AquaPulse W2",
+            "2.0.3",
+            "flt_meters",
+            "ganja,water",
+        ),
+        (
+            "Water Meter-119",
+            "AquaPulse W2",
+            "2.0.3",
+            "flt_meters",
+            "ganja,water",
+        ),
+        (
+            "Substation Meter-7",
+            "VoltEdge M3",
+            "5.4.1",
+            "flt_meters",
+            "sumqayit,grid",
+        ),
+        (
+            "Tracker Truck-12",
+            "PathTag T4",
+            "4.0.2",
+            "flt_trackers",
+            "fleet,truck",
+        ),
+        (
+            "Tracker Truck-19",
+            "PathTag T4",
+            "4.0.2",
+            "flt_trackers",
+            "fleet,truck",
+        ),
+        (
+            "Tracker Van-03",
+            "PathTag T4",
+            "4.0.1",
+            "flt_trackers",
+            "fleet,van",
+        ),
+        (
+            "Tracker Reefer-08",
+            "PathTag T7",
+            "4.3.0",
+            "flt_trackers",
+            "fleet,reefer",
+        ),
     ];
     for (name, model, fw, fleet, tags) in devices {
         let id = format!("dev_{}", ulid::Ulid::new().to_string().to_lowercase());
-        db.create_device(&id, name, model, fw, Some(fleet), &api::devices::claim_code(), tags, now)?;
+        db.create_device(
+            &id,
+            name,
+            model,
+            fw,
+            Some(fleet),
+            &api::devices::claim_code(),
+            tags,
+            now,
+        )?;
     }
+    Ok(())
+}
+
+/// Seed the default alert rules on first boot.
+fn ensure_rules(db: &Db) -> anyhow::Result<()> {
+    if db.rule_count() > 0 {
+        return Ok(());
+    }
+    let now = auth::now();
+    db.create_rule(
+        "rule_temp",
+        "High temperature",
+        "tempC",
+        "gt",
+        30.0,
+        "warning",
+        now,
+    )?;
+    db.create_rule(
+        "rule_batt",
+        "Low battery",
+        "batteryPct",
+        "lt",
+        15.0,
+        "warning",
+        now,
+    )?;
     Ok(())
 }
 

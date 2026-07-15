@@ -9,6 +9,7 @@ pub mod devices;
 pub mod fleets;
 pub mod logs;
 pub mod operators;
+pub mod rules;
 pub mod settings;
 
 use axum::body::Body;
@@ -54,12 +55,19 @@ pub fn set_session_cookie(token: &str) -> String {
 }
 
 pub fn clear_session_cookie() -> String {
-    format!("{}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0", session::SESSION_COOKIE)
+    format!(
+        "{}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
+        session::SESSION_COOKIE
+    )
 }
 
 /// Require a valid session; block mutating methods for read-only roles. Injects
 /// `Claims` into request extensions for downstream handlers.
-pub async fn require_auth(State(state): State<AppState>, mut req: Request<Body>, next: Next) -> Response {
+pub async fn require_auth(
+    State(state): State<AppState>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Response {
     let claims = match claims_from_headers(&state.secret, req.headers()) {
         Some(c) => c,
         None => return err(StatusCode::UNAUTHORIZED, "authentication required"),
@@ -97,29 +105,55 @@ pub fn routes(state: AppState) -> Router {
         .route("/whoami", get(auth::whoami))
         .route("/live", get(live_snapshot))
         .route("/devices", get(devices::list).post(devices::create))
-        .route("/devices/{id}", get(devices::get_one).put(devices::update).delete(devices::delete))
+        .route(
+            "/devices/{id}",
+            get(devices::get_one)
+                .put(devices::update)
+                .delete(devices::delete),
+        )
         .route("/devices/{id}/twin", post(devices::set_twin))
         .route("/fleets", get(fleets::list).post(fleets::create))
         .route("/fleets/{id}", delete(fleets::delete))
         .route("/alerts", get(alerts::list))
         .route("/alerts/{id}/ack", post(alerts::ack))
         .route("/alerts/{id}/resolve", post(alerts::resolve))
+        .route("/rules", get(rules::list).post(rules::create))
+        .route("/rules/{id}", put(rules::toggle).delete(rules::delete))
         .route("/logs", get(logs::list))
         .route("/commands", get(commands::list))
         .route("/devices/{id}/command", post(commands::send))
-        .route("/config-profiles", get(delivery::list_profiles).post(delivery::create_profile))
+        .route(
+            "/config-profiles",
+            get(delivery::list_profiles).post(delivery::create_profile),
+        )
         .route("/config-profiles/{id}", delete(delivery::delete_profile))
         .route("/config-profiles/{id}/apply", post(delivery::apply_profile))
-        .route("/firmware", get(delivery::list_firmware).post(delivery::create_firmware))
+        .route(
+            "/firmware",
+            get(delivery::list_firmware).post(delivery::create_firmware),
+        )
         .route("/firmware/{id}", delete(delivery::delete_firmware))
-        .route("/ota", get(delivery::list_campaigns).post(delivery::create_campaign))
+        .route(
+            "/ota",
+            get(delivery::list_campaigns).post(delivery::create_campaign),
+        )
+        .route("/ota/{id}/rollback", post(delivery::rollback_campaign))
         .route("/operators", get(operators::list).post(operators::create))
-        .route("/operators/{id}", put(operators::update).delete(operators::delete))
+        .route(
+            "/operators/{id}",
+            put(operators::update).delete(operators::delete),
+        )
         .route("/auth/passcode", post(settings::change_passcode))
         .route("/backup", get(settings::backup))
         .route("/export/devices.csv", get(settings::export_devices))
-        .route("/webhook", get(settings::get_webhook).put(settings::set_webhook))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
+        .route(
+            "/webhook",
+            get(settings::get_webhook).put(settings::set_webhook),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_auth,
+        ));
 
     Router::new()
         .nest("/api", public.merge(protected))

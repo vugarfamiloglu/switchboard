@@ -31,8 +31,15 @@ pub async fn create_profile(State(st): State<AppState>, Json(b): Json<ProfileBod
         return err(StatusCode::BAD_REQUEST, "name is required");
     }
     let id = format!("cfg_{}", ulid::Ulid::new().to_string().to_lowercase());
-    let values = if b.values.is_null() { json!({}) } else { b.values };
-    match st.db.create_config_profile(&id, b.name.trim(), &values.to_string(), now()) {
+    let values = if b.values.is_null() {
+        json!({})
+    } else {
+        b.values
+    };
+    match st
+        .db
+        .create_config_profile(&id, b.name.trim(), &values.to_string(), now())
+    {
         Ok(_) => ok(json!({ "id": id })),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
@@ -51,7 +58,11 @@ pub struct ApplyBody {
     pub device_id: String,
 }
 
-pub async fn apply_profile(State(st): State<AppState>, Path(id): Path<String>, Json(b): Json<ApplyBody>) -> Response {
+pub async fn apply_profile(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<ApplyBody>,
+) -> Response {
     let values = match st.db.config_profile_values(&id) {
         Some(v) => v,
         None => return err(StatusCode::NOT_FOUND, "profile not found"),
@@ -82,9 +93,19 @@ pub async fn create_firmware(State(st): State<AppState>, Json(b): Json<FirmwareB
         return err(StatusCode::BAD_REQUEST, "model and version are required");
     }
     let id = format!("fw_{}", ulid::Ulid::new().to_string().to_lowercase());
-    let sha = format!("{:x}", Sha256::digest(format!("{}:{}", b.model.trim(), b.version.trim()).as_bytes()));
+    let sha = format!(
+        "{:x}",
+        Sha256::digest(format!("{}:{}", b.model.trim(), b.version.trim()).as_bytes())
+    );
     let size = if b.size_kb > 0 { b.size_kb } else { 1024 };
-    match st.db.create_firmware(&id, b.model.trim(), b.version.trim(), size, &sha[..16], now()) {
+    match st.db.create_firmware(
+        &id,
+        b.model.trim(),
+        b.version.trim(),
+        size,
+        &sha[..16],
+        now(),
+    ) {
         Ok(_) => ok(json!({ "id": id })),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }
@@ -117,6 +138,17 @@ fn hundred() -> i64 {
     100
 }
 
+pub async fn rollback_campaign(State(st): State<AppState>, Path(id): Path<String>) -> Response {
+    match st.db.rollback_campaign(&id, now()) {
+        Ok(0) => err(
+            StatusCode::NOT_FOUND,
+            "campaign not found or not rollbackable",
+        ),
+        Ok(_) => ok(json!({ "status": "rolled_back" })),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
 pub async fn create_campaign(State(st): State<AppState>, Json(b): Json<CampaignBody>) -> Response {
     if b.firmware_id.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "firmware is required");
@@ -130,7 +162,10 @@ pub async fn create_campaign(State(st): State<AppState>, Json(b): Json<CampaignB
     let canary = b.canary_pct.clamp(1, 100);
     let total = (in_scope * canary / 100).max(1);
     let id = format!("ota_{}", ulid::Ulid::new().to_string().to_lowercase());
-    match st.db.create_campaign(&id, b.firmware_id.trim(), fleet, canary, total, now()) {
+    match st
+        .db
+        .create_campaign(&id, b.firmware_id.trim(), fleet, canary, total, now())
+    {
         Ok(_) => ok(json!({ "id": id, "total": total })),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }

@@ -13,7 +13,7 @@ use rusqlite::Connection;
 
 use crate::models::{
     Alert, Command, ConfigProfile, Device, DeviceDetail, Firmware, Fleet, LogEntry, Operator,
-    OtaCampaign,
+    OtaCampaign, Rule,
 };
 
 const SCHEMA: &str = "
@@ -65,6 +65,16 @@ CREATE TABLE IF NOT EXISTS alerts (
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_state ON alerts(state);
+CREATE TABLE IF NOT EXISTS rules (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    metric     TEXT NOT NULL,
+    op         TEXT NOT NULL DEFAULT 'gt',
+    threshold  REAL NOT NULL DEFAULT 0,
+    severity   TEXT NOT NULL DEFAULT 'warning',
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS logs (
     id        TEXT PRIMARY KEY,
     device_id TEXT,
@@ -126,19 +136,28 @@ impl Db {
             "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
         )?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn: Arc::new(Mutex::new(conn)) })
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     /// Borrow the locked connection for one short unit of work. Keep it
     /// synchronous and self-contained — see the module discipline note.
-    pub fn with<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    pub fn with<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<T> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         f(&conn)
     }
 
     pub fn get_setting(&self, key: &str) -> Option<String> {
-        self.with(|c| c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)))
-            .ok()
+        self.with(|c| {
+            c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| {
+                r.get(0)
+            })
+        })
+        .ok()
     }
 
     /// A clean SQLite snapshot (VACUUM INTO) returned as bytes, for backup.
@@ -227,7 +246,15 @@ impl Db {
         .unwrap_or_default()
     }
 
-    pub fn update_operator(&self, id: &str, name: &str, email: &str, role: &str, status: &str, now: i64) -> rusqlite::Result<usize> {
+    pub fn update_operator(
+        &self,
+        id: &str,
+        name: &str,
+        email: &str,
+        role: &str,
+        status: &str,
+        now: i64,
+    ) -> rusqlite::Result<usize> {
         self.with(|c| {
             c.execute(
                 "UPDATE operators SET name=?2,email=?3,role=?4,status=?5,updated_at=?6 WHERE id=?1",
@@ -236,8 +263,18 @@ impl Db {
         })
     }
 
-    pub fn update_operator_password(&self, id: &str, hash: &str, now: i64) -> rusqlite::Result<usize> {
-        self.with(|c| c.execute("UPDATE operators SET password_hash=?2,updated_at=?3 WHERE id=?1", rusqlite::params![id, hash, now]))
+    pub fn update_operator_password(
+        &self,
+        id: &str,
+        hash: &str,
+        now: i64,
+    ) -> rusqlite::Result<usize> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE operators SET password_hash=?2,updated_at=?3 WHERE id=?1",
+                rusqlite::params![id, hash, now],
+            )
+        })
     }
 
     pub fn delete_operator(&self, id: &str) -> rusqlite::Result<usize> {
@@ -245,7 +282,8 @@ impl Db {
     }
 
     pub fn operator_role(&self, id: &str) -> Option<String> {
-        self.with(|c| c.query_row("SELECT role FROM operators WHERE id=?1", [id], |r| r.get(0))).ok()
+        self.with(|c| c.query_row("SELECT role FROM operators WHERE id=?1", [id], |r| r.get(0)))
+            .ok()
     }
 
     // ---- Fleets -------------------------------------------------------------
@@ -271,7 +309,13 @@ impl Db {
         .unwrap_or_default()
     }
 
-    pub fn create_fleet(&self, id: &str, name: &str, description: &str, now: i64) -> rusqlite::Result<()> {
+    pub fn create_fleet(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
                 "INSERT INTO fleets(id,name,description,created_at) VALUES(?1,?2,?3,?4)",
@@ -317,8 +361,10 @@ impl Db {
                     let claim_code: Option<String> = r.get(14)?;
                     Ok(DeviceDetail {
                         device,
-                        desired: serde_json::from_str(&desired).unwrap_or_else(|_| serde_json::json!({})),
-                        reported: serde_json::from_str(&reported).unwrap_or_else(|_| serde_json::json!({})),
+                        desired: serde_json::from_str(&desired)
+                            .unwrap_or_else(|_| serde_json::json!({})),
+                        reported: serde_json::from_str(&reported)
+                            .unwrap_or_else(|_| serde_json::json!({})),
                         claim_code,
                     })
                 },
@@ -372,7 +418,12 @@ impl Db {
         self.with(|c| c.execute("DELETE FROM devices WHERE id=?1", [id]))
     }
 
-    pub fn set_twin_desired(&self, id: &str, desired_json: &str, now: i64) -> rusqlite::Result<usize> {
+    pub fn set_twin_desired(
+        &self,
+        id: &str,
+        desired_json: &str,
+        now: i64,
+    ) -> rusqlite::Result<usize> {
         self.with(|c| {
             c.execute(
                 "UPDATE devices SET desired=?2, twin_version=twin_version+1, updated_at=?3 WHERE id=?1",
@@ -437,7 +488,15 @@ impl Db {
         .is_ok()
     }
 
-    pub fn insert_alert(&self, id: &str, device: &str, severity: &str, title: &str, detail: &str, now: i64) -> rusqlite::Result<()> {
+    pub fn insert_alert(
+        &self,
+        id: &str,
+        device: &str,
+        severity: &str,
+        title: &str,
+        detail: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
                 "INSERT INTO alerts(id,device_id,severity,title,detail,state,created_at,updated_at)
@@ -451,20 +510,109 @@ impl Db {
     /// Open/acked alerts for a device as (id, title) — used to resolve cleared ones.
     pub fn open_alerts_for(&self, device: &str) -> Vec<(String, String)> {
         self.with(|c| {
-            let mut stmt = c.prepare("SELECT id,title FROM alerts WHERE device_id=?1 AND state IN ('open','acked')")?;
-            let rows = stmt.query_map([device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut stmt = c.prepare(
+                "SELECT id,title FROM alerts WHERE device_id=?1 AND state IN ('open','acked')",
+            )?;
+            let rows = stmt.query_map([device], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
             rows.collect::<rusqlite::Result<Vec<(String, String)>>>()
         })
         .unwrap_or_default()
     }
 
     pub fn set_alert_state(&self, id: &str, state: &str, now: i64) -> rusqlite::Result<usize> {
-        self.with(|c| c.execute("UPDATE alerts SET state=?2, updated_at=?3 WHERE id=?1", rusqlite::params![id, state, now]))
+        self.with(|c| {
+            c.execute(
+                "UPDATE alerts SET state=?2, updated_at=?3 WHERE id=?1",
+                rusqlite::params![id, state, now],
+            )
+        })
+    }
+
+    // ---- Rules --------------------------------------------------------------
+
+    fn query_rules(&self, only_enabled: bool) -> Vec<Rule> {
+        let sql = if only_enabled {
+            "SELECT id,name,metric,op,threshold,severity,enabled,created_at FROM rules WHERE enabled=1 ORDER BY name"
+        } else {
+            "SELECT id,name,metric,op,threshold,severity,enabled,created_at FROM rules ORDER BY name"
+        };
+        self.with(|c| {
+            let mut stmt = c.prepare(sql)?;
+            let rows = stmt.query_map([], |r| {
+                Ok(Rule {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    metric: r.get(2)?,
+                    op: r.get(3)?,
+                    threshold: r.get(4)?,
+                    severity: r.get(5)?,
+                    enabled: r.get::<_, i64>(6)? != 0,
+                    created_at: r.get(7)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<Rule>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn list_rules(&self) -> Vec<Rule> {
+        self.query_rules(false)
+    }
+
+    pub fn list_enabled_rules(&self) -> Vec<Rule> {
+        self.query_rules(true)
+    }
+
+    pub fn rule_count(&self) -> i64 {
+        self.with(|c| c.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get(0)))
+            .unwrap_or(0)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_rule(
+        &self,
+        id: &str,
+        name: &str,
+        metric: &str,
+        op: &str,
+        threshold: f64,
+        severity: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO rules(id,name,metric,op,threshold,severity,enabled,created_at) VALUES(?1,?2,?3,?4,?5,?6,1,?7)",
+                rusqlite::params![id, name, metric, op, threshold, severity, now],
+            )
+            .map(|_| ())
+        })
+    }
+
+    pub fn set_rule_enabled(&self, id: &str, enabled: bool) -> rusqlite::Result<usize> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE rules SET enabled=?2 WHERE id=?1",
+                rusqlite::params![id, enabled as i64],
+            )
+        })
+    }
+
+    pub fn delete_rule(&self, id: &str) -> rusqlite::Result<usize> {
+        self.with(|c| c.execute("DELETE FROM rules WHERE id=?1", [id]))
     }
 
     // ---- Logs ---------------------------------------------------------------
 
-    pub fn insert_log(&self, id: &str, device: &str, ts: i64, level: &str, msg: &str) -> rusqlite::Result<()> {
+    pub fn insert_log(
+        &self,
+        id: &str,
+        device: &str,
+        ts: i64,
+        level: &str,
+        msg: &str,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
                 "INSERT INTO logs(id,device_id,ts,level,msg) VALUES(?1,?2,?3,?4,?5)",
@@ -508,7 +656,14 @@ impl Db {
 
     // ---- Commands -----------------------------------------------------------
 
-    pub fn insert_command(&self, id: &str, device: &str, name: &str, args: &str, now: i64) -> rusqlite::Result<()> {
+    pub fn insert_command(
+        &self,
+        id: &str,
+        device: &str,
+        name: &str,
+        args: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
                 "INSERT INTO commands(id,device_id,name,args,status,result,created_at,updated_at)
@@ -535,16 +690,27 @@ impl Db {
     /// Pending commands as (id, device_id, name) for the sim to fulfil.
     pub fn list_pending_commands(&self) -> Vec<(String, String, String)> {
         self.with(|c| {
-            let mut stmt = c.prepare("SELECT id,device_id,name FROM commands WHERE status='pending'")?;
+            let mut stmt =
+                c.prepare("SELECT id,device_id,name FROM commands WHERE status='pending'")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
             })?;
             rows.collect::<rusqlite::Result<Vec<(String, String, String)>>>()
         })
         .unwrap_or_default()
     }
 
-    pub fn complete_command(&self, id: &str, status: &str, result: &str, now: i64) -> rusqlite::Result<usize> {
+    pub fn complete_command(
+        &self,
+        id: &str,
+        status: &str,
+        result: &str,
+        now: i64,
+    ) -> rusqlite::Result<usize> {
         self.with(|c| {
             c.execute(
                 "UPDATE commands SET status=?2, result=?3, updated_at=?4 WHERE id=?1",
@@ -555,7 +721,14 @@ impl Db {
 
     /// Upsert a device reporting in via the agent ingest path: register it if new,
     /// then record the reported twin and last-seen and mark it active.
-    pub fn ingest_device(&self, id: &str, name: &str, model: &str, reported: &str, now: i64) -> rusqlite::Result<()> {
+    pub fn ingest_device(
+        &self,
+        id: &str,
+        name: &str,
+        model: &str,
+        reported: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
                 "INSERT OR IGNORE INTO devices(id,name,model,status,created_at,updated_at) VALUES(?1,?2,?3,'active',?4,?4)",
@@ -578,7 +751,8 @@ impl Db {
 
     pub fn list_config_profiles(&self) -> Vec<ConfigProfile> {
         self.with(|c| {
-            let mut stmt = c.prepare("SELECT id,name,body,created_at FROM config_profiles ORDER BY name")?;
+            let mut stmt =
+                c.prepare("SELECT id,name,body,created_at FROM config_profiles ORDER BY name")?;
             let rows = stmt.query_map([], |r| {
                 let values: String = r.get(2)?;
                 Ok(ConfigProfile {
@@ -593,9 +767,19 @@ impl Db {
         .unwrap_or_default()
     }
 
-    pub fn create_config_profile(&self, id: &str, name: &str, values: &str, now: i64) -> rusqlite::Result<()> {
+    pub fn create_config_profile(
+        &self,
+        id: &str,
+        name: &str,
+        values: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
-            c.execute("INSERT INTO config_profiles(id,name,body,created_at) VALUES(?1,?2,?3,?4)", rusqlite::params![id, name, values, now]).map(|_| ())
+            c.execute(
+                "INSERT INTO config_profiles(id,name,body,created_at) VALUES(?1,?2,?3,?4)",
+                rusqlite::params![id, name, values, now],
+            )
+            .map(|_| ())
         })
     }
 
@@ -604,7 +788,12 @@ impl Db {
     }
 
     pub fn config_profile_values(&self, id: &str) -> Option<String> {
-        self.with(|c| c.query_row("SELECT body FROM config_profiles WHERE id=?1", [id], |r| r.get(0))).ok()
+        self.with(|c| {
+            c.query_row("SELECT body FROM config_profiles WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+        })
+        .ok()
     }
 
     // ---- Firmware + OTA -----------------------------------------------------
@@ -620,7 +809,15 @@ impl Db {
         .unwrap_or_default()
     }
 
-    pub fn create_firmware(&self, id: &str, model: &str, version: &str, size_kb: i64, sha256: &str, now: i64) -> rusqlite::Result<()> {
+    pub fn create_firmware(
+        &self,
+        id: &str,
+        model: &str,
+        version: &str,
+        size_kb: i64,
+        sha256: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute("INSERT INTO firmware(id,model,version,size_kb,sha256,created_at) VALUES(?1,?2,?3,?4,?5,?6)", rusqlite::params![id, model, version, size_kb, sha256, now]).map(|_| ())
         })
@@ -659,7 +856,15 @@ impl Db {
         .unwrap_or_default()
     }
 
-    pub fn create_campaign(&self, id: &str, firmware: &str, fleet: Option<&str>, canary: i64, total: i64, now: i64) -> rusqlite::Result<()> {
+    pub fn create_campaign(
+        &self,
+        id: &str,
+        firmware: &str,
+        fleet: Option<&str>,
+        canary: i64,
+        total: i64,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
                 "INSERT INTO ota_campaigns(id,firmware_id,fleet_id,canary_pct,status,total,updated,created_at,updated_at)
@@ -667,6 +872,15 @@ impl Db {
                 rusqlite::params![id, firmware, fleet, canary, total, now],
             )
             .map(|_| ())
+        })
+    }
+
+    pub fn rollback_campaign(&self, id: &str, now: i64) -> rusqlite::Result<usize> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE ota_campaigns SET status='rolled_back', updated_at=?2 WHERE id=?1 AND status IN ('running','completed')",
+                rusqlite::params![id, now],
+            )
         })
     }
 
@@ -729,12 +943,23 @@ mod tests {
     #[test]
     fn device_registry_roundtrip() {
         let (db, dir) = temp_db();
-        db.create_device("dev_1", "Sensor A", "ModelX", "1.0", None, "SW-AAA111", "tag", 100).unwrap();
+        db.create_device(
+            "dev_1",
+            "Sensor A",
+            "ModelX",
+            "1.0",
+            None,
+            "SW-AAA111",
+            "tag",
+            100,
+        )
+        .unwrap();
         assert_eq!(db.device_count(), 1);
         let d = db.get_device("dev_1").unwrap();
         assert_eq!(d.device.name, "Sensor A");
         assert_eq!(d.claim_code.as_deref(), Some("SW-AAA111"));
-        db.set_twin_desired("dev_1", "{\"mode\":\"eco\"}", 150).unwrap();
+        db.set_twin_desired("dev_1", "{\"mode\":\"eco\"}", 150)
+            .unwrap();
         assert_eq!(db.get_device("dev_1").unwrap().device.twin_version, 1);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
@@ -743,7 +968,8 @@ mod tests {
     #[test]
     fn ingest_autoregisters_and_records() {
         let (db, dir) = temp_db();
-        db.ingest_device("dev_agent", "Agent", "FieldKit", "{\"tempC\":22.0}", 200).unwrap();
+        db.ingest_device("dev_agent", "Agent", "FieldKit", "{\"tempC\":22.0}", 200)
+            .unwrap();
         let d = db.get_device("dev_agent").unwrap();
         assert_eq!(d.device.status, "active");
         assert_eq!(d.reported.get("tempC").and_then(|v| v.as_f64()), Some(22.0));
@@ -756,7 +982,15 @@ mod tests {
         let (db, dir) = temp_db();
         db.set_setting("k", "v").unwrap();
         assert_eq!(db.get_setting("k"), Some("v".into()));
-        db.insert_alert("alr_1", "dev_1", "warning", "High temperature", "detail", 100).unwrap();
+        db.insert_alert(
+            "alr_1",
+            "dev_1",
+            "warning",
+            "High temperature",
+            "detail",
+            100,
+        )
+        .unwrap();
         assert!(db.open_alert_exists("dev_1", "High temperature"));
         db.set_alert_state("alr_1", "resolved", 200).unwrap();
         assert!(!db.open_alert_exists("dev_1", "High temperature"));
