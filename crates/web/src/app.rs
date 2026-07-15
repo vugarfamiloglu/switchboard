@@ -142,6 +142,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/commands") view=Commands/>
                         <Route path=path!("/config") view=Config/>
                         <Route path=path!("/firmware") view=Firmware/>
+                        <Route path=path!("/team") view=Team/>
                     </Routes>
                 </main>
             </div>
@@ -155,7 +156,7 @@ const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "#")]),
-    ("Admin", &[("Team", "TM", "#"), ("Settings", "ST", "#")]),
+    ("Admin", &[("Team", "TM", "/team"), ("Settings", "ST", "#")]),
 ];
 
 #[component]
@@ -407,6 +408,97 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[component]
+fn Team() -> impl IntoView {
+    let auth = use_auth();
+    let ops = RwSignal::new(Vec::<api::Operator>::new());
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(o) = api::operators().await {
+                ops.set(o);
+            }
+        });
+    };
+    reload();
+    let (name, set_name) = signal(String::new());
+    let (email, set_email) = signal(String::new());
+    let (role, set_role) = signal(String::from("operator"));
+    let (pw, set_pw) = signal(String::new());
+    let (msg, set_msg) = signal(String::new());
+    let can_manage = move || matches!(auth.role.get().as_str(), "owner" | "admin");
+
+    let create = move |_| {
+        let (n, e, r, p) = (name.get(), email.get(), role.get(), pw.get());
+        if n.trim().is_empty() || e.trim().is_empty() || p.len() < 6 {
+            set_msg.set("Name, email, and a 6+ character password are required".into());
+            return;
+        }
+        set_msg.set(String::new());
+        spawn_local(async move {
+            match api::create_operator(&n, &e, &r, &p).await {
+                Ok(_) => {
+                    set_name.set(String::new());
+                    set_email.set(String::new());
+                    set_pw.set(String::new());
+                    reload();
+                }
+                Err(e) => set_msg.set(e),
+            }
+        });
+    };
+    let remove = move |id: String| {
+        spawn_local(async move {
+            let _ = api::delete_operator(&id).await;
+            reload();
+        });
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Team"</h1>
+            <p class="page-desc">"Console operators and their access roles."</p>
+        </div></div>
+        <div class="role-legend mono">
+            <span><b>"Owner / Admin"</b>" — full access + manage team"</span>
+            <span><b>"Operator"</b>" — full access"</span>
+            <span><b>"Viewer"</b>" — read-only"</span>
+        </div>
+        {move || can_manage().then(|| view! {
+            <div class="panel section-block">
+                <div class="panel-title">"Invite operator"</div>
+                <div class="form-row cfg-actions">
+                    <input class="input mono" placeholder="Name" prop:value=move || name.get() on:input=move |e| set_name.set(event_target_value(&e))/>
+                    <input class="input mono" placeholder="email@switchboard.local" prop:value=move || email.get() on:input=move |e| set_email.set(event_target_value(&e))/>
+                    <select class="lvl-select mono" on:change=move |e| set_role.set(event_target_value(&e))>
+                        <option value="operator">"operator"</option>
+                        <option value="admin">"admin"</option>
+                        <option value="viewer">"viewer"</option>
+                    </select>
+                    <input class="input mono" type="password" placeholder="password (6+)" prop:value=move || pw.get() on:input=move |e| set_pw.set(event_target_value(&e))/>
+                    <button class="btn btn-primary btn-inline" on:click=create>"Invite"</button>
+                </div>
+                {move || (!msg.get().is_empty()).then(|| view! { <div class="cfg-msg mono">{msg.get()}</div> })}
+            </div>
+        })}
+        <div class="dtable">
+            <div class="dt-head mono team-cols"><span>"STATE"</span><span>"OPERATOR"</span><span>"EMAIL"</span><span>"ROLE"</span><span></span></div>
+            {move || ops.get().into_iter().map(|o| {
+                let can = can_manage() && o.role != "owner";
+                let id = o.id.clone();
+                view! {
+                    <div class="dt-row team-cols cmd-row">
+                        <span><span class=if o.status == "active" { "dot dot-up" } else { "dot dot-idle" }></span>{o.status.clone()}</span>
+                        <span class="cell-strong">{o.name.clone()}</span>
+                        <span class="mono u-muted">{o.email.clone()}</span>
+                        <span class="mono">{o.role.to_uppercase()}</span>
+                        <span>{can.then(|| { let id = id.clone(); view! { <button class="mini-btn" on:click=move |_| remove(id.clone())>"Remove"</button> } })}</span>
+                    </div>
+                }
+            }).collect_view()}
+        </div>
     }
 }
 

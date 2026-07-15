@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 
 use crate::models::{
-    Alert, Command, ConfigProfile, Device, DeviceDetail, Firmware, Fleet, LogEntry, OtaCampaign,
+    Alert, Command, ConfigProfile, Device, DeviceDetail, Firmware, Fleet, LogEntry, Operator,
+    OtaCampaign,
 };
 
 const SCHEMA: &str = "
@@ -192,6 +193,48 @@ impl Db {
             )
             .map(|_| ())
         })
+    }
+
+    pub fn list_operators(&self) -> Vec<Operator> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id,name,email,role,status,created_at FROM operators
+                 ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'operator' THEN 2 ELSE 3 END, name",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(Operator {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    email: r.get(2)?,
+                    role: r.get(3)?,
+                    status: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<Operator>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn update_operator(&self, id: &str, name: &str, email: &str, role: &str, status: &str, now: i64) -> rusqlite::Result<usize> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE operators SET name=?2,email=?3,role=?4,status=?5,updated_at=?6 WHERE id=?1",
+                rusqlite::params![id, name, email, role, status, now],
+            )
+        })
+    }
+
+    pub fn update_operator_password(&self, id: &str, hash: &str, now: i64) -> rusqlite::Result<usize> {
+        self.with(|c| c.execute("UPDATE operators SET password_hash=?2,updated_at=?3 WHERE id=?1", rusqlite::params![id, hash, now]))
+    }
+
+    pub fn delete_operator(&self, id: &str) -> rusqlite::Result<usize> {
+        self.with(|c| c.execute("DELETE FROM operators WHERE id=?1", [id]))
+    }
+
+    pub fn operator_role(&self, id: &str) -> Option<String> {
+        self.with(|c| c.query_row("SELECT role FROM operators WHERE id=?1", [id], |r| r.get(0))).ok()
     }
 
     // ---- Fleets -------------------------------------------------------------

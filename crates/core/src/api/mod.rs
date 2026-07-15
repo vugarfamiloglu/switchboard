@@ -8,13 +8,14 @@ pub mod delivery;
 pub mod devices;
 pub mod fleets;
 pub mod logs;
+pub mod operators;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::Serialize;
 use serde_json::json;
@@ -110,6 +111,8 @@ pub fn routes(state: AppState) -> Router {
         .route("/firmware", get(delivery::list_firmware).post(delivery::create_firmware))
         .route("/firmware/{id}", delete(delivery::delete_firmware))
         .route("/ota", get(delivery::list_campaigns).post(delivery::create_campaign))
+        .route("/operators", get(operators::list).post(operators::create))
+        .route("/operators/{id}", put(operators::update).delete(operators::delete))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

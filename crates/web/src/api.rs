@@ -45,6 +45,16 @@ pub async fn post_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) 
     }
 }
 
+pub async fn del_json<T: DeserializeOwned>(path: &str) -> Result<T, String> {
+    let resp = Request::delete(path).send().await.map_err(|e| e.to_string())?;
+    let env: Envelope<T> = resp.json().await.map_err(|e| e.to_string())?;
+    if env.ok {
+        env.data.ok_or_else(|| "empty response".to_string())
+    } else {
+        Err(env.error.unwrap_or_else(|| "request failed".into()))
+    }
+}
+
 // ---- Types (mirror the core DTOs) ------------------------------------------
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -82,6 +92,17 @@ pub struct DeviceDetail {
     #[serde(default)]
     pub reported: serde_json::Value,
     pub claim_code: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Operator {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub role: String,
+    pub status: String,
+    pub created_at: i64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -263,6 +284,18 @@ pub async fn campaigns() -> Result<Vec<OtaCampaign>, String> {
 
 pub async fn fleets() -> Result<Vec<Fleet>, String> {
     get_json("/api/fleets").await
+}
+
+pub async fn operators() -> Result<Vec<Operator>, String> {
+    get_json("/api/operators").await
+}
+
+pub async fn create_operator(name: &str, email: &str, role: &str, password: &str) -> Result<serde_json::Value, String> {
+    post_json("/api/operators", &serde_json::json!({ "name": name, "email": email, "role": role, "password": password })).await
+}
+
+pub async fn delete_operator(id: &str) -> Result<serde_json::Value, String> {
+    del_json(&format!("/api/operators/{id}")).await
 }
 
 pub async fn create_campaign(firmware: &str, fleet: Option<String>, canary: i64) -> Result<serde_json::Value, String> {

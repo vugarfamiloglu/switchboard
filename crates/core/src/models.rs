@@ -32,6 +32,17 @@ pub struct Device {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Operator {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub role: String,
+    pub status: String,
+    pub created_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Alert {
     pub id: String,
     pub device_id: Option<String>,
