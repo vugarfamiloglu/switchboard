@@ -27,7 +27,10 @@ pub async fn create(State(st): State<AppState>, Json(b): Json<CreateBody>) -> Re
         return err(StatusCode::BAD_REQUEST, "name is required");
     }
     let id = format!("flt_{}", ulid::Ulid::new().to_string().to_lowercase());
-    match st.db.create_fleet(&id, b.name.trim(), &b.description, now()) {
+    match st
+        .db
+        .create_fleet(&id, b.name.trim(), &b.description, now())
+    {
         Ok(_) => ok(json!({ "id": id })),
         Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
     }

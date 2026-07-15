@@ -36,21 +36,41 @@ pub struct CreateBody {
     pub password: String,
 }
 
-pub async fn create(State(st): State<AppState>, Extension(claims): Extension<Claims>, Json(b): Json<CreateBody>) -> Response {
+pub async fn create(
+    State(st): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(b): Json<CreateBody>,
+) -> Response {
     if !can_manage(&claims) {
-        return err(StatusCode::FORBIDDEN, "only owners and admins can manage the team");
+        return err(
+            StatusCode::FORBIDDEN,
+            "only owners and admins can manage the team",
+        );
     }
     if b.name.trim().is_empty() || b.email.trim().is_empty() || b.password.len() < 6 {
-        return err(StatusCode::BAD_REQUEST, "name, email, and a 6+ character password are required");
+        return err(
+            StatusCode::BAD_REQUEST,
+            "name, email, and a 6+ character password are required",
+        );
     }
     let hash = match hash_passcode(&b.password) {
         Ok(h) => h,
         Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "could not hash password"),
     };
     let id = format!("op_{}", ulid::Ulid::new().to_string().to_lowercase());
-    match st.db.insert_operator(&id, b.name.trim(), &b.email.trim().to_lowercase(), role_or_default(&b.role), &hash, now()) {
+    match st.db.insert_operator(
+        &id,
+        b.name.trim(),
+        &b.email.trim().to_lowercase(),
+        role_or_default(&b.role),
+        &hash,
+        now(),
+    ) {
         Ok(_) => ok(json!({ "id": id })),
-        Err(_) => err(StatusCode::BAD_REQUEST, "could not create operator (email may already exist)"),
+        Err(_) => err(
+            StatusCode::BAD_REQUEST,
+            "could not create operator (email may already exist)",
+        ),
     }
 }
 
@@ -70,25 +90,47 @@ fn active() -> String {
     "active".into()
 }
 
-pub async fn update(State(st): State<AppState>, Extension(claims): Extension<Claims>, Path(id): Path<String>, Json(b): Json<UpdateBody>) -> Response {
+pub async fn update(
+    State(st): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<String>,
+    Json(b): Json<UpdateBody>,
+) -> Response {
     if !can_manage(&claims) {
-        return err(StatusCode::FORBIDDEN, "only owners and admins can manage the team");
+        return err(
+            StatusCode::FORBIDDEN,
+            "only owners and admins can manage the team",
+        );
     }
     if b.password.len() >= 6 {
         if let Ok(h) = hash_passcode(&b.password) {
             let _ = st.db.update_operator_password(&id, &h, now());
         }
     }
-    match st.db.update_operator(&id, b.name.trim(), &b.email.trim().to_lowercase(), role_or_default(&b.role), &b.status, now()) {
+    match st.db.update_operator(
+        &id,
+        b.name.trim(),
+        &b.email.trim().to_lowercase(),
+        role_or_default(&b.role),
+        &b.status,
+        now(),
+    ) {
         Ok(0) => err(StatusCode::NOT_FOUND, "operator not found"),
         Ok(_) => ok(json!({ "updated": true })),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
-pub async fn delete(State(st): State<AppState>, Extension(claims): Extension<Claims>, Path(id): Path<String>) -> Response {
+pub async fn delete(
+    State(st): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<String>,
+) -> Response {
     if !can_manage(&claims) {
-        return err(StatusCode::FORBIDDEN, "only owners and admins can manage the team");
+        return err(
+            StatusCode::FORBIDDEN,
+            "only owners and admins can manage the team",
+        );
     }
     if st.db.operator_role(&id).as_deref() == Some("owner") {
         return err(StatusCode::BAD_REQUEST, "cannot remove an owner");

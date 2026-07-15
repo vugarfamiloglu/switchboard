@@ -24,7 +24,10 @@ pub async fn change_passcode(State(st): State<AppState>, Json(b): Json<PasscodeB
         return err(StatusCode::UNAUTHORIZED, "current passcode is incorrect");
     }
     if b.next.trim().len() < 6 {
-        return err(StatusCode::BAD_REQUEST, "the new passcode must be at least 6 characters");
+        return err(
+            StatusCode::BAD_REQUEST,
+            "the new passcode must be at least 6 characters",
+        );
     }
     match hash_passcode(b.next.trim()) {
         Ok(hash) => {
@@ -40,8 +43,16 @@ pub async fn backup(State(st): State<AppState>) -> Response {
         Ok(bytes) => {
             let mut resp = bytes.into_response();
             let h = resp.headers_mut();
-            h.insert(header::CONTENT_TYPE, "application/octet-stream".parse().unwrap());
-            h.insert(header::CONTENT_DISPOSITION, "attachment; filename=\"switchboard-backup.db\"".parse().unwrap());
+            h.insert(
+                header::CONTENT_TYPE,
+                "application/octet-stream".parse().unwrap(),
+            );
+            h.insert(
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"switchboard-backup.db\""
+                    .parse()
+                    .unwrap(),
+            );
             resp
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
@@ -64,8 +75,16 @@ pub async fn export_devices(State(st): State<AppState>) -> Response {
     }
     let mut resp = csv.into_response();
     let h = resp.headers_mut();
-    h.insert(header::CONTENT_TYPE, "text/csv; charset=utf-8".parse().unwrap());
-    h.insert(header::CONTENT_DISPOSITION, "attachment; filename=\"switchboard-devices.csv\"".parse().unwrap());
+    h.insert(
+        header::CONTENT_TYPE,
+        "text/csv; charset=utf-8".parse().unwrap(),
+    );
+    h.insert(
+        header::CONTENT_DISPOSITION,
+        "attachment; filename=\"switchboard-devices.csv\""
+            .parse()
+            .unwrap(),
+    );
     resp
 }
 

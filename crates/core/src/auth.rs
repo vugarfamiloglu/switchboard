@@ -62,7 +62,8 @@ pub fn parse_token(secret: &str, token: &str) -> Option<Claims> {
 }
 
 fn sign(secret: &str, payload: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac accepts any key length");
     mac.update(payload.as_bytes());
     B64U.encode(mac.finalize().into_bytes())
 }

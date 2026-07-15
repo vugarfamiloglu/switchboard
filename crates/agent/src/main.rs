@@ -20,7 +20,9 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn main() {
     let host = env_or("SWITCHBOARD_MQTT_HOST", "localhost");
-    let port: u16 = env_or("SWITCHBOARD_MQTT_PORT", "1883").parse().unwrap_or(1883);
+    let port: u16 = env_or("SWITCHBOARD_MQTT_PORT", "1883")
+        .parse()
+        .unwrap_or(1883);
     let device = env_or("SWITCHBOARD_DEVICE", "dev_agent_demo");
     let name = env_or("SWITCHBOARD_NAME", "Field Agent Device");
     let topic = format!("switchboard/{device}/telemetry");

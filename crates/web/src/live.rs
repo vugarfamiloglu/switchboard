@@ -87,7 +87,11 @@ pub fn use_live() -> LiveCtx {
 
 fn ws_url() -> String {
     let loc = web_sys::window().expect("window").location();
-    let proto = if loc.protocol().unwrap_or_default() == "https:" { "wss" } else { "ws" };
+    let proto = if loc.protocol().unwrap_or_default() == "https:" {
+        "wss"
+    } else {
+        "ws"
+    };
     let host = loc.host().unwrap_or_default();
     format!("{proto}://{host}/api/ws")
 }

@@ -43,12 +43,21 @@ pub async fn create(State(st): State<AppState>, Json(b): Json<CreateBody>) -> Re
     let id = format!("dev_{}", ulid::Ulid::new().to_string().to_lowercase());
     let claim = claim_code();
     let fleet = b.fleet_id.as_deref().filter(|s| !s.is_empty());
-    match st
-        .db
-        .create_device(&id, b.name.trim(), &b.model, &b.fw_version, fleet, &claim, &b.tags, now())
-    {
+    match st.db.create_device(
+        &id,
+        b.name.trim(),
+        &b.model,
+        &b.fw_version,
+        fleet,
+        &claim,
+        &b.tags,
+        now(),
+    ) {
         Ok(_) => ok(json!({ "id": id, "claimCode": claim })),
-        Err(e) => err(StatusCode::BAD_REQUEST, &format!("could not create device: {e}")),
+        Err(e) => err(
+            StatusCode::BAD_REQUEST,
+            &format!("could not create device: {e}"),
+        ),
     }
 }
 
@@ -69,9 +78,21 @@ fn default_status() -> String {
     "active".into()
 }
 
-pub async fn update(State(st): State<AppState>, Path(id): Path<String>, Json(b): Json<UpdateBody>) -> Response {
+pub async fn update(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<UpdateBody>,
+) -> Response {
     let fleet = b.fleet_id.as_deref().filter(|s| !s.is_empty());
-    match st.db.update_device(&id, b.name.trim(), &b.model, fleet, &b.status, &b.tags, now()) {
+    match st.db.update_device(
+        &id,
+        b.name.trim(),
+        &b.model,
+        fleet,
+        &b.status,
+        &b.tags,
+        now(),
+    ) {
         Ok(0) => err(StatusCode::NOT_FOUND, "device not found"),
         Ok(_) => ok(json!({ "updated": true })),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -91,7 +112,11 @@ pub struct TwinBody {
     pub desired: serde_json::Value,
 }
 
-pub async fn set_twin(State(st): State<AppState>, Path(id): Path<String>, Json(b): Json<TwinBody>) -> Response {
+pub async fn set_twin(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<TwinBody>,
+) -> Response {
     match st.db.set_twin_desired(&id, &b.desired.to_string(), now()) {
         Ok(0) => err(StatusCode::NOT_FOUND, "device not found"),
         Ok(_) => ok(json!({ "updated": true })),
@@ -112,10 +137,26 @@ pub struct IngestBody {
 /// Public device ingest — a device (or the reference agent) reports telemetry.
 /// Registers the device if new, records the reported twin + last-seen, and
 /// streams a log line so agent activity is visible live.
-pub async fn ingest(State(st): State<AppState>, Path(id): Path<String>, Json(b): Json<IngestBody>) -> Response {
-    let name = if b.name.trim().is_empty() { "Agent Device".to_string() } else { b.name.trim().to_string() };
-    let model = if b.model.trim().is_empty() { "Agent".to_string() } else { b.model.trim().to_string() };
-    let reported = if b.metrics.is_null() { "{}".to_string() } else { b.metrics.to_string() };
+pub async fn ingest(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<IngestBody>,
+) -> Response {
+    let name = if b.name.trim().is_empty() {
+        "Agent Device".to_string()
+    } else {
+        b.name.trim().to_string()
+    };
+    let model = if b.model.trim().is_empty() {
+        "Agent".to_string()
+    } else {
+        b.model.trim().to_string()
+    };
+    let reported = if b.metrics.is_null() {
+        "{}".to_string()
+    } else {
+        b.metrics.to_string()
+    };
     crate::ingest::apply(&st.db, &st.hub, &id, &name, &model, &reported, "HTTP agent");
     ok(json!({ "accepted": true }))
 }
@@ -125,6 +166,8 @@ pub fn claim_code() -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = rand::thread_rng();
-    let s: String = (0..6).map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char).collect();
+    let s: String = (0..6)
+        .map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char)
+        .collect();
     format!("SW-{s}")
 }

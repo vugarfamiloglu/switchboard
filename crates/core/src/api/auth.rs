@@ -42,16 +42,27 @@ pub async fn login(State(st): State<AppState>, Json(body): Json<LoginBody>) -> R
         if !session::verify_passcode(&hash, body.passcode.trim()) {
             return err(StatusCode::UNAUTHORIZED, "invalid passcode");
         }
-        ("owner".to_string(), "owner".to_string(), "Owner".to_string())
+        (
+            "owner".to_string(),
+            "owner".to_string(),
+            "Owner".to_string(),
+        )
     };
 
     let token = match session::issue_token(&st.secret, &oid, &role, &name) {
         Ok(t) => t,
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "could not create session"),
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "could not create session",
+            )
+        }
     };
     let mut resp = ok(json!({ "authenticated": true, "role": role, "name": name }));
-    resp.headers_mut()
-        .insert(header::SET_COOKIE, set_session_cookie(&token).parse().unwrap());
+    resp.headers_mut().insert(
+        header::SET_COOKIE,
+        set_session_cookie(&token).parse().unwrap(),
+    );
     resp
 }
 

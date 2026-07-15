@@ -23,7 +23,11 @@ pub struct SendBody {
     pub args: String,
 }
 
-pub async fn send(State(st): State<AppState>, Path(id): Path<String>, Json(b): Json<SendBody>) -> Response {
+pub async fn send(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<SendBody>,
+) -> Response {
     if !st.db.device_exists(&id) {
         return err(StatusCode::NOT_FOUND, "device not found");
     }
@@ -31,7 +35,10 @@ pub async fn send(State(st): State<AppState>, Path(id): Path<String>, Json(b): J
         return err(StatusCode::BAD_REQUEST, "command name is required");
     }
     let cid = format!("cmd_{}", ulid::Ulid::new().to_string().to_lowercase());
-    match st.db.insert_command(&cid, &id, b.name.trim(), &b.args, now()) {
+    match st
+        .db
+        .insert_command(&cid, &id, b.name.trim(), &b.args, now())
+    {
         Ok(_) => ok(json!({ "id": cid, "status": "pending" })),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }

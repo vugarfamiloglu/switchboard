@@ -48,7 +48,9 @@ pub fn start(db: Db, hub: Hub) {
                     let topic = String::from_utf8_lossy(&fwd.publish.topic).to_string();
                     let parts: Vec<&str> = topic.split('/').collect();
                     if parts.len() == 3 && parts[0] == "switchboard" && parts[2] == "telemetry" {
-                        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&fwd.publish.payload) {
+                        if let Ok(v) =
+                            serde_json::from_slice::<serde_json::Value>(&fwd.publish.payload)
+                        {
                             let (name, model, reported) = ingest::parse_payload(&v);
                             ingest::apply(&db, &hub, parts[1], &name, &model, &reported, "MQTT");
                         }
