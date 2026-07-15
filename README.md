@@ -24,19 +24,20 @@ Every device is a *line* on the board; the console is where you patch them.
 |-------|-----------|
 | ![Rust](https://img.shields.io/badge/-Rust-000?logo=rust&logoColor=white) | Backend — Axum + Tokio (single self-hostable binary) |
 | ![Leptos](https://img.shields.io/badge/-Leptos-ef3939?logo=leptos&logoColor=white) | Frontend — Leptos → WebAssembly (CSR SPA, built by Trunk) |
-| ![MQTT](https://img.shields.io/badge/-MQTT-660066?logo=mqtt&logoColor=white) | Device ingestion — HTTP + WebSocket today; MQTT is the production transport |
+| ![MQTT](https://img.shields.io/badge/-MQTT-660066?logo=mqtt&logoColor=white) | Device ingestion — an **embedded MQTT broker** (`:1883`) plus an HTTP ingest fallback |
 | ![SQLite](https://img.shields.io/badge/-SQLite-003b57?logo=sqlite&logoColor=white) | Structural store (WAL) + in-memory live telemetry |
 | ![WebAssembly](https://img.shields.io/badge/-WASM-654ff0?logo=webassembly&logoColor=white) | Console runs in the browser as WebAssembly |
 
 ## Features
 
 - **Registry & provisioning** — devices, fleets, twins (desired/reported), claim-code enrollment
+- **Ingestion** — devices publish to the embedded MQTT broker (`switchboard/{id}/telemetry`) or the HTTP ingest endpoint; both feed one pipeline that auto-registers unknown devices
 - **Live telemetry** — per-device metrics streamed over WebSocket; the Overview *patch-bay wall* lights up per device
 - **Fleet map** — devices plotted live by geographic position
-- **Config & OTA** — reusable config profiles pushed to twins; firmware registry + canary rollout campaigns with live progress
-- **Remote commands** — reboot / ping / sync / identify, fulfilled with responses
+- **Config & OTA** — reusable config profiles pushed to twins; firmware registry + canary rollout campaigns with live progress and one-click **rollback**
+- **Remote commands** — reboot / ping / sync / identify, dispatched from the Commands page or per-device from its detail view, fulfilled with responses
 - **Logs** — live-tail device log stream with level + text filters
-- **Rules & alerts** — a rule engine raises and auto-resolves alerts (offline, high temp, low battery); ack / resolve triage
+- **Rules & alerts** — operator-authored rules (metric / operator / threshold / severity) the engine evaluates live to raise and auto-resolve alerts; enable, disable, or delete any rule; ack / resolve triage
 - **Analytics** — live throughput chart, per-fleet availability, CSV export
 - **Access control** — operator RBAC (owner / admin / operator / **viewer** = read-only), team management, session auth
 - **Platform** — AES-256-GCM vault, SQLite backup, alert webhook, dark/light themes, ⌘-style live console
@@ -81,17 +82,25 @@ docker run -p 7930:7930 -v switchboard-data:/app/data switchboard
 
 ### Reference agent
 
-Drive a real (or extra) device into the fleet over the ingest API:
+Drive a real (or extra) device into the fleet. The agent is an MQTT client — it
+connects to the control plane's **embedded broker** and publishes telemetry to
+`switchboard/{device}/telemetry` every 2s; the broker forwards it into the ingest
+pipeline, which auto-registers the device on first sight:
 
 ```bash
 SWITCHBOARD_DEVICE=dev_field_01 SWITCHBOARD_NAME="Field Probe" \
   cargo run -p switchboard-agent
 ```
 
-The agent publishes telemetry to `POST /api/ingest/{device}` every 2s. In production
-the same payload shape maps onto **MQTT** — a device publishes to
-`switchboard/{device}/telemetry` and an embedded broker forwards it into the same
-ingest pipeline.
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `SWITCHBOARD_MQTT_HOST` | `localhost` | Broker host |
+| `SWITCHBOARD_MQTT_PORT` | `1883` | Broker port |
+| `SWITCHBOARD_DEVICE` | `dev_agent_demo` | Device id (topic + registry key) |
+| `SWITCHBOARD_NAME` | `Field Agent Device` | Reported display name |
+
+The same JSON payload shape is also accepted over HTTP at `POST /api/ingest/{device}`
+for devices that can't speak MQTT.
 
 ## Configuration
 
@@ -100,5 +109,7 @@ ingest pipeline.
 | `SWITCHBOARD_PORT` | `7930` | Console / API / WebSocket port |
 | `SWITCHBOARD_DATA` | `data` | SQLite + vault key directory |
 | `SWITCHBOARD_PASSCODE` | `switchboard` | Owner sign-in passcode |
+
+The embedded MQTT broker listens on `:1883` for device telemetry alongside the console/API port.
 
 See [docs/TECHNICAL-BRIEF.md](docs/TECHNICAL-BRIEF.md) for the full module and data-model reference.
