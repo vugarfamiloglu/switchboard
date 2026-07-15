@@ -301,6 +301,14 @@ pub async fn fleets() -> Result<Vec<Fleet>, String> {
     get_json("/api/fleets").await
 }
 
+pub async fn create_fleet(name: &str, description: &str) -> Result<serde_json::Value, String> {
+    post_json("/api/fleets", &serde_json::json!({ "name": name, "description": description })).await
+}
+
+pub async fn delete_fleet(id: &str) -> Result<serde_json::Value, String> {
+    del_json(&format!("/api/fleets/{id}")).await
+}
+
 pub async fn operators() -> Result<Vec<Operator>, String> {
     get_json("/api/operators").await
 }

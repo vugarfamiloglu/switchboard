@@ -152,6 +152,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/team") view=Team/>
                         <Route path=path!("/settings") view=Settings/>
                         <Route path=path!("/analytics") view=Analytics/>
+                        <Route path=path!("/fleets") view=Fleets/>
                     </Routes>
                 </main>
             </div>
@@ -161,7 +162,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
 
 const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "#")]),
-    ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "#")]),
+    ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "/fleets")]),
     ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "/analytics")]),
@@ -598,6 +599,71 @@ fn Settings() -> impl IntoView {
                     {move || (!wh_msg.get().is_empty()).then(|| view! { <div class="cfg-msg mono">{wh_msg.get()}</div> })}
                 </div>
             })}
+        </div>
+    }
+}
+
+#[component]
+fn Fleets() -> impl IntoView {
+    let auth = use_auth();
+    let fleets = RwSignal::new(Vec::<api::Fleet>::new());
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(f) = api::fleets().await {
+                fleets.set(f);
+            }
+        });
+    };
+    reload();
+    let (name, set_name) = signal(String::new());
+    let (desc, set_desc) = signal(String::new());
+    let can_write = move || auth.role.get() != "viewer";
+    let create = move |_| {
+        let (n, d) = (name.get(), desc.get());
+        if n.trim().is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            let _ = api::create_fleet(&n, &d).await;
+            set_name.set(String::new());
+            set_desc.set(String::new());
+            reload();
+        });
+    };
+    let remove = move |id: String| {
+        spawn_local(async move {
+            let _ = api::delete_fleet(&id).await;
+            reload();
+        });
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Fleets"</h1>
+            <p class="page-desc">"Group devices into fleets for config and rollout targeting."</p>
+        </div></div>
+        {move || can_write().then(|| view! {
+            <div class="panel section-block">
+                <div class="panel-title">"New fleet"</div>
+                <div class="form-row cfg-actions">
+                    <input class="input mono" placeholder="Fleet name" prop:value=move || name.get() on:input=move |e| set_name.set(event_target_value(&e))/>
+                    <input class="input mono" placeholder="Description" prop:value=move || desc.get() on:input=move |e| set_desc.set(event_target_value(&e))/>
+                    <button class="btn btn-primary btn-inline" on:click=create>"Create fleet"</button>
+                </div>
+            </div>
+        })}
+        <div class="cfg-grid">
+            {move || fleets.get().into_iter().map(|f| {
+                let can = can_write();
+                let id = f.id.clone();
+                view! {
+                    <div class="cfg-card">
+                        <div class="between"><div class="cfg-name">{f.name.clone()}</div><span class="pill pill-state-acked">{f.device_count}" devices"</span></div>
+                        <div class="set-sub" style="margin:6px 0 10px">{f.description.clone()}</div>
+                        {can.then(|| { let id = id.clone(); view! { <button class="mini-btn" on:click=move |_| remove(id.clone())>"Delete"</button> } })}
+                    </div>
+                }
+            }).collect_view()}
         </div>
     }
 }
