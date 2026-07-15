@@ -10,8 +10,10 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod sim;
 mod state;
 mod vault;
+mod ws;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -46,12 +48,16 @@ async fn main() -> anyhow::Result<()> {
     ensure_operators(&db)?;
     tracing::info!("database ready at {} · {} operators seeded", cfg.db_path(), db.operator_count());
 
+    let hub = ws::Hub::new();
+    sim::Sim::new(hub.clone()).spawn();
+
     let port = cfg.port;
     let state = AppState {
         db,
         cfg: Arc::new(cfg),
         vault,
         secret: Arc::new(secret),
+        hub,
     };
     let app = router(state);
 

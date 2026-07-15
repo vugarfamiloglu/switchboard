@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::db::Db;
 use crate::vault::Vault;
+use crate::ws::Hub;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -13,4 +14,6 @@ pub struct AppState {
     pub vault: Vault,
     /// HMAC secret for signing session tokens.
     pub secret: Arc<String>,
+    /// Live telemetry fan-out to connected consoles.
+    pub hub: Hub,
 }

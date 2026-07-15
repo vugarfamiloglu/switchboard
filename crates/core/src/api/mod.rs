@@ -72,6 +72,7 @@ pub fn routes(state: AppState) -> Router {
     // Public endpoints (no session required).
     let public = Router::new()
         .route("/health", get(health))
+        .route("/ws", get(crate::ws::ws_handler))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me));

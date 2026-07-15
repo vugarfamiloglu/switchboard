@@ -12,6 +12,6 @@ rewrite = "/api/"
 backend = "http://127.0.0.1:7930/api/"
 
 [[proxy]]
-rewrite = "/ws"
-backend = "ws://127.0.0.1:7930/ws"
+rewrite = "/api/ws"
+backend = "ws://127.0.0.1:7930/api/ws"
 ws = true
