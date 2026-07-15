@@ -113,19 +113,10 @@ pub struct IngestBody {
 /// Registers the device if new, records the reported twin + last-seen, and
 /// streams a log line so agent activity is visible live.
 pub async fn ingest(State(st): State<AppState>, Path(id): Path<String>, Json(b): Json<IngestBody>) -> Response {
-    let name = if b.name.trim().is_empty() { "Agent Device" } else { b.name.trim() };
-    let model = if b.model.trim().is_empty() { "Agent" } else { b.model.trim() };
+    let name = if b.name.trim().is_empty() { "Agent Device".to_string() } else { b.name.trim().to_string() };
+    let model = if b.model.trim().is_empty() { "Agent".to_string() } else { b.model.trim().to_string() };
     let reported = if b.metrics.is_null() { "{}".to_string() } else { b.metrics.to_string() };
-    let ts = now();
-    let _ = st.db.ingest_device(&id, name, model, &reported, ts);
-    let log_id = format!("log_{}", ulid::Ulid::new().to_string().to_lowercase());
-    let _ = st.db.insert_log(&log_id, &id, ts, "info", "Telemetry received from device agent");
-    st.hub.broadcast(
-        json!({ "type": "log", "ts": ts, "data": {
-            "id": log_id, "deviceId": id, "deviceName": name, "ts": ts, "level": "info", "msg": "Telemetry received from device agent"
-        } })
-        .to_string(),
-    );
+    crate::ingest::apply(&st.db, &st.hub, &id, &name, &model, &reported, "HTTP agent");
     ok(json!({ "accepted": true }))
 }
 

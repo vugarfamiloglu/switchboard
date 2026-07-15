@@ -6,8 +6,10 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod ingest;
 mod live;
 mod models;
+mod mqtt;
 mod sim;
 mod state;
 mod vault;
@@ -65,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         hub,
         live,
     };
+    mqtt::start(state.db.clone(), state.hub.clone());
     let app = router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
