@@ -151,6 +151,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/firmware") view=Firmware/>
                         <Route path=path!("/team") view=Team/>
                         <Route path=path!("/settings") view=Settings/>
+                        <Route path=path!("/analytics") view=Analytics/>
                     </Routes>
                 </main>
             </div>
@@ -163,7 +164,7 @@ const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "#")]),
     ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
-    ("Insights", &[("Analytics", "AN", "#")]),
+    ("Insights", &[("Analytics", "AN", "/analytics")]),
     ("Admin", &[("Team", "TM", "/team"), ("Settings", "ST", "/settings")]),
 ];
 
@@ -416,6 +417,96 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+fn area_path(series: &[f64], w: f64, h: f64) -> (String, String) {
+    let max = series.iter().cloned().fold(1.0_f64, f64::max);
+    let n = series.len();
+    let pts: Vec<(f64, f64)> = series
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let x = i as f64 / (n - 1) as f64 * w;
+            let y = h - (v / max) * (h - 10.0) - 5.0;
+            (x, y)
+        })
+        .collect();
+    let line = pts
+        .iter()
+        .enumerate()
+        .map(|(i, (x, y))| format!("{}{:.1} {:.1}", if i == 0 { "M" } else { "L" }, x, y))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let area = format!("{} L {:.1} {:.1} L 0 {:.1} Z", line, w, h, h);
+    (line, area)
+}
+
+#[component]
+fn Analytics() -> impl IntoView {
+    let live = use_live();
+    let devices = RwSignal::new(Vec::<Device>::new());
+    spawn_local(async move {
+        if let Ok(d) = api::devices().await {
+            devices.set(d);
+        }
+    });
+    let agg = move || live.telemetry.get().aggregate;
+    let export = move |_| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.location().set_href("/api/export/devices.csv");
+        }
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Analytics"</h1>
+            <p class="page-desc">"Fleet throughput, availability, and distribution."</p>
+        </div></div>
+        <div class="kpi-grid">
+            <div class="stat stat-amber"><div class="stat-label mono">"TELEMETRY RATE"</div><div class="stat-value">{move || format!("{:.0}", agg().msg_rate)}<span class="stat-unit mono">" msg/s"</span></div></div>
+            <div class="stat stat-up"><div class="stat-label mono">"ONLINE"</div><div class="stat-value">{move || agg().online}<span class="stat-unit mono">{move || format!(" / {}", agg().total)}</span></div></div>
+            <div class=move || format!("stat stat-{}", if agg().alerts > 0 { "alarm" } else { "up" })><div class="stat-label mono">"OPEN FAULTS"</div><div class="stat-value">{move || agg().alerts}</div></div>
+            <div class="stat stat-up"><div class="stat-label mono">"AVAILABILITY"</div><div class="stat-value">{move || { let a = agg(); if a.total == 0 { "100.0".to_string() } else { format!("{:.1}", a.online as f64 / a.total as f64 * 100.0) } }}<span class="stat-unit mono">" %"</span></div></div>
+        </div>
+        <section class="panel section-block">
+            <div class="panel-head"><div class="panel-title">"Throughput"</div><div class="panel-note mono">"live · msg/s"</div></div>
+            {move || {
+                let s = live.series.get();
+                if s.len() < 2 {
+                    return view! { <div class="chart-empty mono">"gathering samples…"</div> }.into_any();
+                }
+                let (line, area) = area_path(&s, 640.0, 130.0);
+                view! { <svg viewBox="0 0 640 130" class="chart" preserveAspectRatio="none"><path d=area class="chart-area"/><path d=line class="chart-line"/></svg> }.into_any()
+            }}
+        </section>
+        <section class="panel section-block">
+            <div class="panel-head"><div class="panel-title">"Fleet availability"</div><button class="btn btn-inline" on:click=export>"Export CSV"</button></div>
+            <div class="bars">
+                {move || {
+                    let tele = live.telemetry.get();
+                    let mut fleets: std::collections::BTreeMap<String, (u32, u32)> = std::collections::BTreeMap::new();
+                    for d in devices.get() {
+                        let online = tele.devices.get(&d.id).map(|l| l.online).unwrap_or(false);
+                        let e = fleets.entry(d.fleet_name.clone().unwrap_or_else(|| "Unassigned".into())).or_default();
+                        e.1 += 1;
+                        if online {
+                            e.0 += 1;
+                        }
+                    }
+                    fleets.into_iter().map(|(name, (on, total))| {
+                        let pct = if total > 0 { on * 100 / total } else { 0 };
+                        view! {
+                            <div class="bar-row">
+                                <span class="bar-label">{name}</span>
+                                <div class="bar-track"><div class="bar-fill" style=format!("width:{}%", pct)></div></div>
+                                <span class="bar-val mono">{on}" / "{total}</span>
+                            </div>
+                        }
+                    }).collect_view().into_any()
+                }}
+            </div>
+        </section>
     }
 }
 

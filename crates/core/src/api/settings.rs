@@ -48,6 +48,35 @@ pub async fn backup(State(st): State<AppState>) -> Response {
     }
 }
 
+pub async fn export_devices(State(st): State<AppState>) -> Response {
+    let mut csv = String::from("id,name,model,fleet,status,fwVersion,lastSeen\n");
+    for d in st.db.list_devices() {
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            d.id,
+            csv_field(&d.name),
+            csv_field(&d.model),
+            csv_field(&d.fleet_name.unwrap_or_default()),
+            d.status,
+            d.fw_version,
+            d.last_seen
+        ));
+    }
+    let mut resp = csv.into_response();
+    let h = resp.headers_mut();
+    h.insert(header::CONTENT_TYPE, "text/csv; charset=utf-8".parse().unwrap());
+    h.insert(header::CONTENT_DISPOSITION, "attachment; filename=\"switchboard-devices.csv\"".parse().unwrap());
+    resp
+}
+
+fn csv_field(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 pub async fn get_webhook(State(st): State<AppState>) -> Response {
     ok(json!({ "url": st.db.get_setting("webhook_url").unwrap_or_default() }))
 }

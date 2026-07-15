@@ -116,6 +116,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/operators/{id}", put(operators::update).delete(operators::delete))
         .route("/auth/passcode", post(settings::change_passcode))
         .route("/backup", get(settings::backup))
+        .route("/export/devices.csv", get(settings::export_devices))
         .route("/webhook", get(settings::get_webhook).put(settings::set_webhook))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 

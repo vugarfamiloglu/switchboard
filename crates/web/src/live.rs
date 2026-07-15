@@ -10,11 +10,14 @@ use serde::Deserialize;
 use crate::api::{self, LogEntry, Telemetry};
 
 const LOG_CAP: usize = 200;
+const SERIES_CAP: usize = 60;
 
 #[derive(Clone, Copy)]
 pub struct LiveCtx {
     pub telemetry: RwSignal<Telemetry>,
     pub logs: RwSignal<Vec<LogEntry>>,
+    /// Rolling history of the aggregate message rate for the throughput chart.
+    pub series: RwSignal<Vec<f64>>,
     pub connected: RwSignal<bool>,
 }
 
@@ -30,6 +33,7 @@ pub fn provide_live() -> LiveCtx {
     let ctx = LiveCtx {
         telemetry: RwSignal::new(Telemetry::default()),
         logs: RwSignal::new(Vec::new()),
+        series: RwSignal::new(Vec::new()),
         connected: RwSignal::new(false),
     };
     provide_context(ctx);
@@ -50,7 +54,17 @@ pub fn provide_live() -> LiveCtx {
                 let (_write, mut read) = ws.split();
                 while let Some(Ok(Message::Text(txt))) = read.next().await {
                     match serde_json::from_str::<Frame>(&txt) {
-                        Ok(Frame::Telemetry { data }) => ctx.telemetry.set(data),
+                        Ok(Frame::Telemetry { data }) => {
+                            let rate = data.aggregate.msg_rate;
+                            ctx.telemetry.set(data);
+                            ctx.series.update(|s| {
+                                s.push(rate);
+                                if s.len() > SERIES_CAP {
+                                    let excess = s.len() - SERIES_CAP;
+                                    s.drain(0..excess);
+                                }
+                            });
+                        }
                         Ok(Frame::Log { data }) => ctx.logs.update(|v| {
                             v.insert(0, data);
                             v.truncate(LOG_CAP);
