@@ -1,5 +1,9 @@
 //! Typed client for the Switchboard JSON API. Every response uses the
 //! `{ ok, data } | { ok, error }` envelope, which these helpers unwrap.
+//!
+//! DTO fields mirror the backend wire format; not every field is rendered by the
+//! UI, so dead-code is allowed at the module level.
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 

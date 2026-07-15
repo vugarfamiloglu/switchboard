@@ -462,11 +462,6 @@ impl Db {
         self.with(|c| c.execute("UPDATE alerts SET state=?2, updated_at=?3 WHERE id=?1", rusqlite::params![id, state, now]))
     }
 
-    pub fn open_alert_count(&self) -> i64 {
-        self.with(|c| c.query_row("SELECT COUNT(*) FROM alerts WHERE state IN ('open','acked')", [], |r| r.get(0)))
-            .unwrap_or(0)
-    }
-
     // ---- Logs ---------------------------------------------------------------
 
     pub fn insert_log(&self, id: &str, device: &str, ts: i64, level: &str, msg: &str) -> rusqlite::Result<()> {
@@ -719,4 +714,53 @@ pub struct OperatorAuth {
     pub role: String,
     pub password_hash: String,
     pub status: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_db() -> (Db, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("sbtest-{}", ulid::Ulid::new()));
+        let db = Db::open(dir.join("t.db").to_str().unwrap()).unwrap();
+        (db, dir)
+    }
+
+    #[test]
+    fn device_registry_roundtrip() {
+        let (db, dir) = temp_db();
+        db.create_device("dev_1", "Sensor A", "ModelX", "1.0", None, "SW-AAA111", "tag", 100).unwrap();
+        assert_eq!(db.device_count(), 1);
+        let d = db.get_device("dev_1").unwrap();
+        assert_eq!(d.device.name, "Sensor A");
+        assert_eq!(d.claim_code.as_deref(), Some("SW-AAA111"));
+        db.set_twin_desired("dev_1", "{\"mode\":\"eco\"}", 150).unwrap();
+        assert_eq!(db.get_device("dev_1").unwrap().device.twin_version, 1);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ingest_autoregisters_and_records() {
+        let (db, dir) = temp_db();
+        db.ingest_device("dev_agent", "Agent", "FieldKit", "{\"tempC\":22.0}", 200).unwrap();
+        let d = db.get_device("dev_agent").unwrap();
+        assert_eq!(d.device.status, "active");
+        assert_eq!(d.reported.get("tempC").and_then(|v| v.as_f64()), Some(22.0));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_and_alerts() {
+        let (db, dir) = temp_db();
+        db.set_setting("k", "v").unwrap();
+        assert_eq!(db.get_setting("k"), Some("v".into()));
+        db.insert_alert("alr_1", "dev_1", "warning", "High temperature", "detail", 100).unwrap();
+        assert!(db.open_alert_exists("dev_1", "High temperature"));
+        db.set_alert_state("alr_1", "resolved", 200).unwrap();
+        assert!(!db.open_alert_exists("dev_1", "High temperature"));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

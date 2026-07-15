@@ -161,6 +161,37 @@ fn seed_position(tags: &str, rng: &mut impl Rng) -> (f64, f64) {
     (blat + rng.gen_range(-0.08..0.08), blng + rng.gen_range(-0.10..0.10))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commands_complete() {
+        assert_eq!(command_result("ping").0, "completed");
+        assert_eq!(command_result("reboot").0, "completed");
+        assert_eq!(command_result("unknown").1, "OK");
+    }
+
+    #[test]
+    fn seeded_positions_lie_in_azerbaijan() {
+        let mut rng = rand::thread_rng();
+        for tags in ["baku,grid", "ganja,water", "sumqayit", "unknown"] {
+            let (lat, lng) = seed_position(tags, &mut rng);
+            assert!((38.0..42.0).contains(&lat), "lat {lat}");
+            assert!((44.0..51.0).contains(&lng), "lng {lng}");
+        }
+    }
+
+    #[test]
+    fn profiles_seed_expected_metrics() {
+        let mut rng = rand::thread_rng();
+        let (m, _) = seed_metrics(&profile_for("AeroTherm X3"), &mut rng);
+        assert!(m.contains_key("tempC"));
+        let (m, _) = seed_metrics(&profile_for("PathTag T4"), &mut rng);
+        assert!(m.contains_key("batteryPct"));
+    }
+}
+
 fn command_result(name: &str) -> (&'static str, String) {
     let msg = match name {
         "reboot" => "Reboot initiated; device will reconnect shortly",

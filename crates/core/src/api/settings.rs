@@ -78,7 +78,14 @@ fn csv_field(s: &str) -> String {
 }
 
 pub async fn get_webhook(State(st): State<AppState>) -> Response {
-    ok(json!({ "url": st.db.get_setting("webhook_url").unwrap_or_default() }))
+    // The webhook URL is sealed at rest in the vault.
+    let sealed = st.db.get_setting("webhook_url").unwrap_or_default();
+    let url = if sealed.is_empty() {
+        String::new()
+    } else {
+        st.vault.open(&sealed).unwrap_or_default()
+    };
+    ok(json!({ "url": url }))
 }
 
 #[derive(Deserialize)]
@@ -87,6 +94,12 @@ pub struct WebhookBody {
 }
 
 pub async fn set_webhook(State(st): State<AppState>, Json(b): Json<WebhookBody>) -> Response {
-    let _ = st.db.set_setting("webhook_url", b.url.trim());
-    ok(json!({ "url": b.url.trim() }))
+    let trimmed = b.url.trim();
+    let stored = if trimmed.is_empty() {
+        String::new()
+    } else {
+        st.vault.seal(trimmed).unwrap_or_default()
+    };
+    let _ = st.db.set_setting("webhook_url", &stored);
+    ok(json!({ "url": trimmed }))
 }

@@ -2,10 +2,6 @@
 //! Leptos WASM bundle (`crates/web/dist`) alongside the JSON API and WebSocket
 //! live streams.
 
-// Scaffold-time: some vault/db/auth helpers are wired incrementally across
-// phases. TODO(phase-1): drop this once every module is exercised.
-#![allow(dead_code)]
-
 mod api;
 mod auth;
 mod config;
