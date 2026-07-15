@@ -1,0 +1,68 @@
+//! Live telemetry over WebSocket. Opens `/api/ws`, parses each frame into the
+//! shared `LiveCtx` signal, and reconnects on drop. Also seeds the signal from
+//! the REST snapshot so the UI has data before the first frame arrives.
+
+use futures::StreamExt;
+use gloo_net::websocket::{futures::WebSocket, Message};
+use leptos::prelude::*;
+use serde::Deserialize;
+
+use crate::api::{self, Telemetry};
+
+#[derive(Clone, Copy)]
+pub struct LiveCtx {
+    pub telemetry: RwSignal<Telemetry>,
+    pub connected: RwSignal<bool>,
+}
+
+#[derive(Deserialize)]
+struct Frame {
+    data: Telemetry,
+}
+
+/// Create the live context, seed it from REST, start the WS loop, and provide it.
+pub fn provide_live() -> LiveCtx {
+    let ctx = LiveCtx {
+        telemetry: RwSignal::new(Telemetry::default()),
+        connected: RwSignal::new(false),
+    };
+    provide_context(ctx);
+
+    // Seed from the REST snapshot.
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Ok(t) = api::live_snapshot().await {
+            ctx.telemetry.set(t);
+        }
+    });
+
+    // Live stream with reconnect.
+    let url = ws_url();
+    wasm_bindgen_futures::spawn_local(async move {
+        loop {
+            if let Ok(ws) = WebSocket::open(&url) {
+                ctx.connected.set(true);
+                let (_write, mut read) = ws.split();
+                while let Some(Ok(Message::Text(txt))) = read.next().await {
+                    if let Ok(frame) = serde_json::from_str::<Frame>(&txt) {
+                        ctx.telemetry.set(frame.data);
+                    }
+                }
+                ctx.connected.set(false);
+            }
+            gloo_timers::future::TimeoutFuture::new(2000).await;
+        }
+    });
+
+    ctx
+}
+
+pub fn use_live() -> LiveCtx {
+    use_context::<LiveCtx>().expect("LiveCtx provided at app root")
+}
+
+fn ws_url() -> String {
+    let loc = web_sys::window().expect("window").location();
+    let proto = if loc.protocol().unwrap_or_default() == "https:" { "wss" } else { "ws" };
+    let host = loc.host().unwrap_or_default();
+    format!("{proto}://{host}/api/ws")
+}
