@@ -43,12 +43,15 @@ struct DevSim {
     metrics: HashMap<String, f64>,
     base: HashMap<String, f64>,
     online: bool,
+    lat: f64,
+    lng: f64,
 }
 
 impl DevSim {
-    fn new(id: String, model: &str, rng: &mut impl Rng) -> Self {
+    fn new(id: String, model: &str, tags: &str, rng: &mut impl Rng) -> Self {
         let (metrics, base) = seed_metrics(&profile_for(model), rng);
-        Self { id, metrics, base, online: true }
+        let (lat, lng) = seed_position(tags, rng);
+        Self { id, metrics, base, online: true, lat, lng }
     }
 
     fn tick(&mut self, rng: &mut impl Rng) {
@@ -66,6 +69,11 @@ impl DevSim {
                 let base = self.base.get(k).copied().unwrap_or(*v);
                 *v += (base - *v) * 0.1 + rng.gen_range(-1.0..1.0) * (base.abs() * 0.03 + 0.4);
             }
+        }
+        // Trackers roam; everything else holds position.
+        if self.metrics.contains_key("speedKmh") {
+            self.lat = (self.lat + rng.gen_range(-0.012..0.012)).clamp(38.4, 41.8);
+            self.lng = (self.lng + rng.gen_range(-0.016..0.016)).clamp(44.6, 50.4);
         }
     }
 
@@ -103,15 +111,14 @@ impl DevSim {
     }
 
     fn live(&self, ts: i64) -> DeviceLive {
-        DeviceLive {
-            online: self.online,
-            last_seen: ts,
-            metrics: self
-                .metrics
-                .iter()
-                .map(|(k, v)| (k.clone(), (v * 10.0).round() / 10.0))
-                .collect(),
-        }
+        let mut metrics: HashMap<String, f64> = self
+            .metrics
+            .iter()
+            .map(|(k, v)| (k.clone(), (v * 10.0).round() / 10.0))
+            .collect();
+        metrics.insert("lat".into(), (self.lat * 10000.0).round() / 10000.0);
+        metrics.insert("lng".into(), (self.lng * 10000.0).round() / 10000.0);
+        DeviceLive { online: self.online, last_seen: ts, metrics }
     }
 }
 
@@ -140,6 +147,18 @@ fn seed_metrics(p: &Profile, rng: &mut impl Rng) -> (HashMap<String, f64>, HashM
     }
     let base = m.clone();
     (m, base)
+}
+
+/// Seed a device's position near an Azerbaijani city inferred from its tags.
+fn seed_position(tags: &str, rng: &mut impl Rng) -> (f64, f64) {
+    let (blat, blng) = if tags.contains("ganja") {
+        (40.68, 46.36)
+    } else if tags.contains("sumqayit") {
+        (40.59, 49.67)
+    } else {
+        (40.40, 49.87) // Baku
+    };
+    (blat + rng.gen_range(-0.08..0.08), blng + rng.gen_range(-0.10..0.10))
 }
 
 fn command_result(name: &str) -> (&'static str, String) {
@@ -197,7 +216,7 @@ impl Sim {
             let mut rng = rand::thread_rng();
             devices
                 .iter()
-                .map(|d| DevSim::new(d.id.clone(), &d.model, &mut rng))
+                .map(|d| DevSim::new(d.id.clone(), &d.model, &d.tags, &mut rng))
                 .collect()
         };
         tracing::info!("simulator driving {} devices", sims.len());

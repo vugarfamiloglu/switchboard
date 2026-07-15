@@ -153,6 +153,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/settings") view=Settings/>
                         <Route path=path!("/analytics") view=Analytics/>
                         <Route path=path!("/fleets") view=Fleets/>
+                        <Route path=path!("/map") view=FleetMap/>
                     </Routes>
                 </main>
             </div>
@@ -161,7 +162,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
 }
 
 const NAV: &[(&str, &[(&str, &str, &str)])] = &[
-    ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "#")]),
+    ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "/map")]),
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "/fleets")]),
     ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
@@ -418,6 +419,60 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+// Project lng/lat (Azerbaijan bounding box) into the 960x560 map viewBox.
+fn project(lng: f64, lat: f64) -> (f64, f64) {
+    let x = (lng - 44.5) / 6.0 * 880.0 + 40.0;
+    let y = 520.0 - (lat - 38.3) / 3.6 * 480.0;
+    (x, y)
+}
+
+#[component]
+fn FleetMap() -> impl IntoView {
+    let live = use_live();
+    let devices = RwSignal::new(Vec::<Device>::new());
+    spawn_local(async move {
+        if let Ok(d) = api::devices().await {
+            devices.set(d);
+        }
+    });
+    let navigate = use_navigate();
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Fleet Map"</h1>
+            <p class="page-desc">"Every device on the ground — live position and status."</p>
+        </div></div>
+        <div class="panel map-panel">
+            <svg viewBox="0 0 960 560" class="fleetmap">
+                {[("Baku", 49.87, 40.40), ("Ganja", 46.36, 40.68), ("Sumqayit", 49.67, 40.59)].iter().map(|(n, lng, lat)| {
+                    let (x, y) = project(*lng, *lat);
+                    view! { <text x=x y=y class="map-city mono">{*n}</text> }
+                }).collect_view()}
+                {move || {
+                    let tele = live.telemetry.get();
+                    let navigate = navigate.clone();
+                    devices.get().into_iter().filter_map(|d| {
+                        let dl = tele.devices.get(&d.id)?.clone();
+                        let lat = *dl.metrics.get("lat")?;
+                        let lng = *dl.metrics.get("lng")?;
+                        let (x, y) = project(lng, lat);
+                        let tone = lamp_tone(&d, &dl);
+                        let id = d.id.clone();
+                        let name = d.name.clone();
+                        let navigate = navigate.clone();
+                        Some(view! {
+                            <g class="map-node" transform=format!("translate({:.1},{:.1})", x, y) on:click=move |_| navigate(&format!("/devices/{}", id), Default::default())>
+                                <circle r="6" class=format!("map-dot map-{}", tone)/>
+                                <text y="-11" class="map-label">{name}</text>
+                            </g>
+                        })
+                    }).collect_view()
+                }}
+            </svg>
+        </div>
     }
 }
 
