@@ -1,0 +1,19 @@
+# Switchboard — all-Rust IoT edge fleet control plane.
+# Workspace: `core` (Axum backend, native) + `web` (Leptos SPA, wasm32).
+# Later phases add `agent` (device agent) and `sim` (device simulator).
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/web"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["vugarfamiloglu"]
+repository = "https://github.com/vugarfamiloglu/switchboard"
+
+# Speed-optimized native release (server). WASM size is handled by Trunk's
+# wasm-opt pass, not this profile.
+[profile.release]
+lto = "thin"
+codegen-units = 1

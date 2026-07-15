@@ -1,0 +1,23 @@
+# Rust
+/target
+**/target
+
+# Trunk / WASM build output
+/crates/web/dist
+dist
+
+# Runtime data (SQLite, vault key) — never commit
+/data
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
