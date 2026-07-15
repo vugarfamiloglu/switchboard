@@ -49,7 +49,10 @@ pub fn App() -> impl IntoView {
     });
 
     let (theme, set_theme) = signal(String::from("dark"));
-    provide_context(ThemeCtx { theme, set: set_theme });
+    provide_context(ThemeCtx {
+        theme,
+        set: set_theme,
+    });
 
     view! {
         <div class=move || format!("app-root theme-{}", theme.get())>
@@ -163,12 +166,35 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
 }
 
 const NAV: &[(&str, &[(&str, &str, &str)])] = &[
-    ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "/map")]),
-    ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "/fleets")]),
-    ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
-    ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "/rules"), ("Alerts", "AL", "/alerts")]),
+    (
+        "Operations",
+        &[("Overview", "OV", "/"), ("Fleet Map", "MP", "/map")],
+    ),
+    (
+        "Fleet",
+        &[("Devices", "DV", "/devices"), ("Fleets", "FL", "/fleets")],
+    ),
+    (
+        "Delivery",
+        &[
+            ("Config", "CF", "/config"),
+            ("Firmware", "FW", "/firmware"),
+            ("Commands", "CM", "/commands"),
+        ],
+    ),
+    (
+        "Observe",
+        &[
+            ("Logs", "LG", "/logs"),
+            ("Rules", "RL", "/rules"),
+            ("Alerts", "AL", "/alerts"),
+        ],
+    ),
     ("Insights", &[("Analytics", "AN", "/analytics")]),
-    ("Admin", &[("Team", "TM", "/team"), ("Settings", "ST", "/settings")]),
+    (
+        "Admin",
+        &[("Team", "TM", "/team"), ("Settings", "ST", "/settings")],
+    ),
 ];
 
 #[component]
@@ -270,7 +296,11 @@ fn Overview() -> impl IntoView {
     let agg = move || live.telemetry.get().aggregate;
     let uptime = move || {
         let a = agg();
-        if a.total == 0 { 100.0 } else { a.online as f64 / a.total as f64 * 100.0 }
+        if a.total == 0 {
+            100.0
+        } else {
+            a.online as f64 / a.total as f64 * 100.0
+        }
     };
 
     view! {
@@ -364,7 +394,22 @@ fn Devices() -> impl IntoView {
 fn DeviceDetail() -> impl IntoView {
     let params = use_params_map();
     let live = use_live();
+    let auth = use_auth();
     let detail = RwSignal::new(None::<api::DeviceDetail>);
+    let cmds = RwSignal::new(Vec::<api::Command>::new());
+
+    // Refresh this device's command history (filtered from the global feed).
+    let load_cmds = move || {
+        let id = params.read_untracked().get("id").unwrap_or_default();
+        if id.is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            if let Ok(cs) = api::commands().await {
+                cmds.set(cs.into_iter().filter(|c| c.device_id == id).collect());
+            }
+        });
+    };
 
     Effect::new(move |_| {
         let id = params.read().get("id").unwrap_or_default();
@@ -376,7 +421,34 @@ fn DeviceDetail() -> impl IntoView {
                 detail.set(Some(d));
             }
         });
+        load_cmds();
     });
+
+    // Poll while mounted so dispatched command status settles (sim fulfils within a tick).
+    let alive = RwSignal::new(true);
+    on_cleanup(move || alive.set(false));
+    spawn_local(async move {
+        while alive.get_untracked() {
+            gloo_timers::future::TimeoutFuture::new(2500).await;
+            if !alive.get_untracked() {
+                break;
+            }
+            load_cmds();
+        }
+    });
+
+    let can_write = move || auth.role.get() != "viewer";
+    let send = move |name: &'static str| {
+        let id = params.read_untracked().get("id").unwrap_or_default();
+        if id.is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            let _ = api::send_command(&id, name).await;
+            gloo_timers::future::TimeoutFuture::new(2600).await;
+            load_cmds();
+        });
+    };
 
     view! {
         {move || match detail.get() {
@@ -417,6 +489,39 @@ fn DeviceDetail() -> impl IntoView {
                             </dl>
                         </section>
                     </div>
+                    <section class="panel section-block">
+                        <div class="panel-head">
+                            <div class="panel-title">"Remote commands"</div>
+                            {move || (!can_write()).then(|| view! { <div class="panel-note mono">"read-only role"</div> })}
+                        </div>
+                        {move || can_write().then(|| view! {
+                            <div class="cmd-bar" style="margin-bottom:14px">
+                                <button class="mini-btn" on:click=move |_| send("reboot")>"Reboot"</button>
+                                <button class="mini-btn" on:click=move |_| send("ping")>"Ping"</button>
+                                <button class="mini-btn" on:click=move |_| send("sync")>"Sync config"</button>
+                                <button class="mini-btn" on:click=move |_| send("identify")>"Identify"</button>
+                            </div>
+                        })}
+                        <div class="dtable">
+                            <div class="dt-head mono devcmd-cols"><span>"STATUS"</span><span>"COMMAND"</span><span>"RESULT"</span></div>
+                            {move || {
+                                let list = cmds.get();
+                                if list.is_empty() {
+                                    return view! { <div class="empty">"No commands sent to this device yet."</div> }.into_any();
+                                }
+                                list.into_iter().take(12).map(|c| {
+                                    let pill = if c.status == "completed" { "resolved" } else if c.status == "failed" { "open" } else { "acked" };
+                                    view! {
+                                        <div class="dt-row devcmd-cols cmd-row">
+                                            <span><span class=format!("pill pill-state-{}", pill)>{c.status.clone()}</span></span>
+                                            <span class="mono">{c.name.clone()}</span>
+                                            <span class="u-muted">{if c.result.is_empty() { "—".to_string() } else { c.result.clone() }}</span>
+                                        </div>
+                                    }
+                                }).collect_view().into_any()
+                            }}
+                        </div>
+                    </section>
                 }.into_any()
             }
         }}
@@ -916,11 +1021,23 @@ fn Firmware() -> impl IntoView {
     let camps = RwSignal::new(Vec::<api::OtaCampaign>::new());
     let fleets = RwSignal::new(Vec::<api::Fleet>::new());
     let reload = move || {
-        spawn_local(async move { if let Ok(f) = api::firmware().await { fw.set(f); } });
-        spawn_local(async move { if let Ok(c) = api::campaigns().await { camps.set(c); } });
+        spawn_local(async move {
+            if let Ok(f) = api::firmware().await {
+                fw.set(f);
+            }
+        });
+        spawn_local(async move {
+            if let Ok(c) = api::campaigns().await {
+                camps.set(c);
+            }
+        });
     };
     reload();
-    spawn_local(async move { if let Ok(f) = api::fleets().await { fleets.set(f); } });
+    spawn_local(async move {
+        if let Ok(f) = api::fleets().await {
+            fleets.set(f);
+        }
+    });
 
     // Poll campaign progress while mounted.
     let alive = RwSignal::new(true);
@@ -961,7 +1078,11 @@ fn Firmware() -> impl IntoView {
         }
         let fleet = {
             let s = sel_fleet.get();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
         let cn = canary.get();
         spawn_local(async move {
@@ -1012,14 +1133,21 @@ fn Firmware() -> impl IntoView {
                     if items.is_empty() {
                         return view! { <div class="empty">"No rollouts yet."</div> }.into_any();
                     }
+                    let can = can_write();
                     items.into_iter().map(|c| {
                         let pct = if c.total > 0 { (c.updated * 100 / c.total).min(100) } else { 0 };
+                        let tone = match c.status.as_str() { "completed" => "resolved", "rolled_back" => "open", _ => "acked" };
+                        let can_rb = can && matches!(c.status.as_str(), "running" | "completed");
+                        let rb_id = c.id.clone();
                         view! {
                             <div class="ota-row">
                                 <div class="ota-head">
                                     <span class="ota-fw">{c.firmware_label.clone().unwrap_or_else(|| "firmware".into())}</span>
                                     <span class="ota-fleet mono">{c.fleet_name.clone().unwrap_or_else(|| "all fleets".into())}" · "{c.canary_pct}"%"</span>
-                                    <span class=format!("pill pill-state-{}", if c.status == "completed" { "resolved" } else { "acked" })>{c.status.clone()}</span>
+                                    <span class=format!("pill pill-state-{}", tone)>{c.status.clone().replace('_', " ")}</span>
+                                    {can_rb.then(|| view! {
+                                        <button class="mini-btn ota-rb" on:click=move |_| { let id = rb_id.clone(); spawn_local(async move { let _ = api::rollback_campaign(&id).await; reload(); }); }>"Roll back"</button>
+                                    })}
                                 </div>
                                 <div class="ota-bar"><div class="ota-fill" style=format!("width:{}%", pct)></div></div>
                                 <div class="ota-meta mono">{c.updated}" / "{c.total}" devices"</div>
@@ -1161,29 +1289,113 @@ fn Logs() -> impl IntoView {
 
 #[component]
 fn Rules() -> impl IntoView {
-    let rules = [
-        ("critical", "Device offline", "No telemetry received within the keepalive window", "Raise a critical alert; auto-resolve on reconnect"),
-        ("warning", "High temperature", "tempC exceeds 30 °C", "Raise a warning alert; auto-resolve when it cools"),
-        ("warning", "Low battery", "batteryPct drops below 15%", "Raise a warning alert; auto-resolve on charge"),
-    ];
+    let auth = use_auth();
+    let rules = RwSignal::new(Vec::<api::Rule>::new());
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(r) = api::rules().await {
+                rules.set(r);
+            }
+        });
+    };
+    reload();
+    let (name, set_name) = signal(String::new());
+    let (metric, set_metric) = signal(String::from("tempC"));
+    let (op, set_op) = signal(String::from("gt"));
+    let (thr, set_thr) = signal(String::from("30"));
+    let (sev, set_sev) = signal(String::from("warning"));
+    let (msg, set_msg) = signal(String::new());
+    let can_write = move || auth.role.get() != "viewer";
+
+    let create = move |_| {
+        let n = name.get();
+        if n.trim().is_empty() {
+            set_msg.set("Name is required".into());
+            return;
+        }
+        let t: f64 = match thr.get().trim().parse() {
+            Ok(v) => v,
+            Err(_) => {
+                set_msg.set("Threshold must be a number".into());
+                return;
+            }
+        };
+        let (m, o, s) = (metric.get(), op.get(), sev.get());
+        set_msg.set(String::new());
+        spawn_local(async move {
+            let _ = api::create_rule(&n, &m, &o, t, &s).await;
+            set_name.set(String::new());
+            reload();
+        });
+    };
+    let toggle = move |id: String, en: bool| {
+        spawn_local(async move {
+            let _ = api::toggle_rule(&id, en).await;
+            reload();
+        });
+    };
+    let remove = move |id: String| {
+        spawn_local(async move {
+            let _ = api::delete_rule(&id).await;
+            reload();
+        });
+    };
+
     view! {
         <div class="page-head"><div>
             <h1 class="page-title">"Rules"</h1>
-            <p class="page-desc">"Conditions the telemetry engine evaluates to raise alerts."</p>
+            <p class="page-desc">"Conditions the telemetry engine evaluates every ~30s to raise alerts."</p>
         </div></div>
-        <div class="cfg-grid">
-            {rules.iter().map(|(sev, name, cond, action)| {
-                let dot = if *sev == "critical" { "down" } else { "warn" };
-                view! {
-                    <div class="cfg-card">
-                        <div class="between"><div class="cfg-name">{*name}</div><span class=format!("dot dot-{}", dot)></span></div>
-                        <div class="rule-cond mono">{*cond}</div>
-                        <div class="rule-action">{*action}</div>
-                    </div>
-                }
-            }).collect_view()}
+        {move || can_write().then(|| view! {
+            <div class="panel section-block">
+                <div class="panel-title">"New rule"</div>
+                <div class="form-row cfg-actions">
+                    <input class="input mono" placeholder="Rule name" prop:value=move || name.get() on:input=move |e| set_name.set(event_target_value(&e))/>
+                    <select class="lvl-select mono" on:change=move |e| set_metric.set(event_target_value(&e))>
+                        <option value="tempC">"tempC"</option><option value="batteryPct">"batteryPct"</option>
+                        <option value="rssiDbm">"rssiDbm"</option><option value="voltageV">"voltageV"</option>
+                        <option value="speedKmh">"speedKmh"</option><option value="fanPct">"fanPct"</option>
+                    </select>
+                    <select class="lvl-select mono" on:change=move |e| set_op.set(event_target_value(&e))>
+                        <option value="gt">"greater than"</option><option value="lt">"less than"</option>
+                    </select>
+                    <input class="input mono thr-input" placeholder="threshold" prop:value=move || thr.get() on:input=move |e| set_thr.set(event_target_value(&e))/>
+                    <select class="lvl-select mono" on:change=move |e| set_sev.set(event_target_value(&e))>
+                        <option value="warning">"warning"</option><option value="critical">"critical"</option>
+                    </select>
+                    <button class="btn btn-primary btn-inline" on:click=create>"Add rule"</button>
+                </div>
+                {move || (!msg.get().is_empty()).then(|| view! { <div class="cfg-msg mono">{msg.get()}</div> })}
+            </div>
+        })}
+        <div class="dtable">
+            <div class="dt-head mono rule-cols"><span>"STATE"</span><span>"RULE"</span><span>"CONDITION"</span><span>"SEVERITY"</span><span></span></div>
+            {move || {
+                let can = can_write();
+                rules.get().into_iter().map(|r| {
+                    let id = r.id.clone();
+                    let enabled = r.enabled;
+                    let sign = if r.op == "lt" { "<" } else { ">" };
+                    view! {
+                        <div class="dt-row rule-cols cmd-row">
+                            <span><span class=if enabled { "dot dot-up" } else { "dot dot-idle" }></span>{if enabled { "enabled" } else { "off" }}</span>
+                            <span class="cell-strong">{r.name.clone()}</span>
+                            <span class="mono">{format!("{} {} {}", r.metric, sign, r.threshold)}</span>
+                            <span class=format!("pill pill-state-{}", if r.severity == "critical" { "open" } else { "acked" })>{r.severity.clone()}</span>
+                            <span>{can.then(|| {
+                                let (id_t, id_d) = (id.clone(), id.clone());
+                                view! {
+                                    <div class="alert-acts">
+                                        <button class="mini-btn" on:click=move |_| toggle(id_t.clone(), !enabled)>{if enabled { "Disable" } else { "Enable" }}</button>
+                                        <button class="mini-btn" on:click=move |_| remove(id_d.clone())>"Delete"</button>
+                                    </div>
+                                }
+                            })}</span>
+                        </div>
+                    }
+                }).collect_view()
+            }}
         </div>
-        <p class="scaffold-note mono" style="margin-top:18px">"Built-in rules evaluate every ~30s. Custom user-defined rules are on the roadmap."</p>
     }
 }
 

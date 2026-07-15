@@ -34,7 +34,10 @@ pub async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     }
 }
 
-pub async fn post_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, String> {
+pub async fn post_json<B: Serialize, T: DeserializeOwned>(
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
     let resp = Request::post(path)
         .json(body)
         .map_err(|e| e.to_string())?
@@ -49,7 +52,10 @@ pub async fn post_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) 
     }
 }
 
-pub async fn put_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, String> {
+pub async fn put_json<B: Serialize, T: DeserializeOwned>(
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
     let resp = Request::put(path)
         .json(body)
         .map_err(|e| e.to_string())?
@@ -65,7 +71,10 @@ pub async fn put_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -
 }
 
 pub async fn del_json<T: DeserializeOwned>(path: &str) -> Result<T, String> {
-    let resp = Request::delete(path).send().await.map_err(|e| e.to_string())?;
+    let resp = Request::delete(path)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let env: Envelope<T> = resp.json().await.map_err(|e| e.to_string())?;
     if env.ok {
         env.data.ok_or_else(|| "empty response".to_string())
@@ -131,6 +140,19 @@ pub struct Fleet {
     pub name: String,
     pub description: String,
     pub device_count: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rule {
+    pub id: String,
+    pub name: String,
+    pub metric: String,
+    pub op: String,
+    pub threshold: f64,
+    pub severity: String,
+    pub enabled: bool,
+    pub created_at: i64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -262,7 +284,41 @@ pub async fn alerts() -> Result<Vec<Alert>, String> {
 }
 
 pub async fn alert_action(id: &str, action: &str) -> Result<serde_json::Value, String> {
-    post_json(&format!("/api/alerts/{id}/{action}"), &serde_json::json!({})).await
+    post_json(
+        &format!("/api/alerts/{id}/{action}"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+pub async fn rules() -> Result<Vec<Rule>, String> {
+    get_json("/api/rules").await
+}
+
+pub async fn create_rule(
+    name: &str,
+    metric: &str,
+    op: &str,
+    threshold: f64,
+    severity: &str,
+) -> Result<serde_json::Value, String> {
+    post_json("/api/rules", &serde_json::json!({ "name": name, "metric": metric, "op": op, "threshold": threshold, "severity": severity })).await
+}
+
+pub async fn toggle_rule(id: &str, enabled: bool) -> Result<serde_json::Value, String> {
+    put_json(
+        &format!("/api/rules/{id}"),
+        &serde_json::json!({ "enabled": enabled }),
+    )
+    .await
+}
+
+pub async fn delete_rule(id: &str) -> Result<serde_json::Value, String> {
+    del_json(&format!("/api/rules/{id}")).await
+}
+
+pub async fn rollback_campaign(id: &str) -> Result<serde_json::Value, String> {
+    post_json(&format!("/api/ota/{id}/rollback"), &serde_json::json!({})).await
 }
 
 pub async fn logs() -> Result<Vec<LogEntry>, String> {
@@ -274,19 +330,34 @@ pub async fn commands() -> Result<Vec<Command>, String> {
 }
 
 pub async fn send_command(device: &str, name: &str) -> Result<serde_json::Value, String> {
-    post_json(&format!("/api/devices/{device}/command"), &serde_json::json!({ "name": name })).await
+    post_json(
+        &format!("/api/devices/{device}/command"),
+        &serde_json::json!({ "name": name }),
+    )
+    .await
 }
 
 pub async fn config_profiles() -> Result<Vec<ConfigProfile>, String> {
     get_json("/api/config-profiles").await
 }
 
-pub async fn create_profile(name: &str, values: serde_json::Value) -> Result<serde_json::Value, String> {
-    post_json("/api/config-profiles", &serde_json::json!({ "name": name, "values": values })).await
+pub async fn create_profile(
+    name: &str,
+    values: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    post_json(
+        "/api/config-profiles",
+        &serde_json::json!({ "name": name, "values": values }),
+    )
+    .await
 }
 
 pub async fn apply_profile(id: &str, device: &str) -> Result<serde_json::Value, String> {
-    post_json(&format!("/api/config-profiles/{id}/apply"), &serde_json::json!({ "device_id": device })).await
+    post_json(
+        &format!("/api/config-profiles/{id}/apply"),
+        &serde_json::json!({ "device_id": device }),
+    )
+    .await
 }
 
 pub async fn firmware() -> Result<Vec<Firmware>, String> {
@@ -294,7 +365,11 @@ pub async fn firmware() -> Result<Vec<Firmware>, String> {
 }
 
 pub async fn create_firmware(model: &str, version: &str) -> Result<serde_json::Value, String> {
-    post_json("/api/firmware", &serde_json::json!({ "model": model, "version": version })).await
+    post_json(
+        "/api/firmware",
+        &serde_json::json!({ "model": model, "version": version }),
+    )
+    .await
 }
 
 pub async fn campaigns() -> Result<Vec<OtaCampaign>, String> {
@@ -306,7 +381,11 @@ pub async fn fleets() -> Result<Vec<Fleet>, String> {
 }
 
 pub async fn create_fleet(name: &str, description: &str) -> Result<serde_json::Value, String> {
-    post_json("/api/fleets", &serde_json::json!({ "name": name, "description": description })).await
+    post_json(
+        "/api/fleets",
+        &serde_json::json!({ "name": name, "description": description }),
+    )
+    .await
 }
 
 pub async fn delete_fleet(id: &str) -> Result<serde_json::Value, String> {
@@ -317,8 +396,17 @@ pub async fn operators() -> Result<Vec<Operator>, String> {
     get_json("/api/operators").await
 }
 
-pub async fn create_operator(name: &str, email: &str, role: &str, password: &str) -> Result<serde_json::Value, String> {
-    post_json("/api/operators", &serde_json::json!({ "name": name, "email": email, "role": role, "password": password })).await
+pub async fn create_operator(
+    name: &str,
+    email: &str,
+    role: &str,
+    password: &str,
+) -> Result<serde_json::Value, String> {
+    post_json(
+        "/api/operators",
+        &serde_json::json!({ "name": name, "email": email, "role": role, "password": password }),
+    )
+    .await
 }
 
 pub async fn delete_operator(id: &str) -> Result<serde_json::Value, String> {
@@ -326,7 +414,11 @@ pub async fn delete_operator(id: &str) -> Result<serde_json::Value, String> {
 }
 
 pub async fn change_passcode(current: &str, next: &str) -> Result<serde_json::Value, String> {
-    post_json("/api/auth/passcode", &serde_json::json!({ "current": current, "next": next })).await
+    post_json(
+        "/api/auth/passcode",
+        &serde_json::json!({ "current": current, "next": next }),
+    )
+    .await
 }
 
 pub async fn get_webhook() -> Result<serde_json::Value, String> {
@@ -337,6 +429,14 @@ pub async fn set_webhook(url: &str) -> Result<serde_json::Value, String> {
     put_json("/api/webhook", &serde_json::json!({ "url": url })).await
 }
 
-pub async fn create_campaign(firmware: &str, fleet: Option<String>, canary: i64) -> Result<serde_json::Value, String> {
-    post_json("/api/ota", &serde_json::json!({ "firmware_id": firmware, "fleet_id": fleet, "canary_pct": canary })).await
+pub async fn create_campaign(
+    firmware: &str,
+    fleet: Option<String>,
+    canary: i64,
+) -> Result<serde_json::Value, String> {
+    post_json(
+        "/api/ota",
+        &serde_json::json!({ "firmware_id": firmware, "fleet_id": fleet, "canary_pct": canary }),
+    )
+    .await
 }
