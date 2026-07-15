@@ -108,6 +108,17 @@ pub struct Alert {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub id: String,
+    pub device_id: Option<String>,
+    pub device_name: Option<String>,
+    pub ts: i64,
+    pub level: String,
+    pub msg: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceLive {
     pub online: bool,
     pub last_seen: i64,
@@ -164,4 +175,8 @@ pub async fn alerts() -> Result<Vec<Alert>, String> {
 
 pub async fn alert_action(id: &str, action: &str) -> Result<serde_json::Value, String> {
     post_json(&format!("/api/alerts/{id}/{action}"), &serde_json::json!({})).await
+}
+
+pub async fn logs() -> Result<Vec<LogEntry>, String> {
+    get_json("/api/logs").await
 }

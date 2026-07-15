@@ -7,23 +7,29 @@ use gloo_net::websocket::{futures::WebSocket, Message};
 use leptos::prelude::*;
 use serde::Deserialize;
 
-use crate::api::{self, Telemetry};
+use crate::api::{self, LogEntry, Telemetry};
+
+const LOG_CAP: usize = 200;
 
 #[derive(Clone, Copy)]
 pub struct LiveCtx {
     pub telemetry: RwSignal<Telemetry>,
+    pub logs: RwSignal<Vec<LogEntry>>,
     pub connected: RwSignal<bool>,
 }
 
 #[derive(Deserialize)]
-struct Frame {
-    data: Telemetry,
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Frame {
+    Telemetry { data: Telemetry },
+    Log { data: LogEntry },
 }
 
 /// Create the live context, seed it from REST, start the WS loop, and provide it.
 pub fn provide_live() -> LiveCtx {
     let ctx = LiveCtx {
         telemetry: RwSignal::new(Telemetry::default()),
+        logs: RwSignal::new(Vec::new()),
         connected: RwSignal::new(false),
     };
     provide_context(ctx);
@@ -43,8 +49,13 @@ pub fn provide_live() -> LiveCtx {
                 ctx.connected.set(true);
                 let (_write, mut read) = ws.split();
                 while let Some(Ok(Message::Text(txt))) = read.next().await {
-                    if let Ok(frame) = serde_json::from_str::<Frame>(&txt) {
-                        ctx.telemetry.set(frame.data);
+                    match serde_json::from_str::<Frame>(&txt) {
+                        Ok(Frame::Telemetry { data }) => ctx.telemetry.set(data),
+                        Ok(Frame::Log { data }) => ctx.logs.update(|v| {
+                            v.insert(0, data);
+                            v.truncate(LOG_CAP);
+                        }),
+                        Err(_) => {}
                     }
                 }
                 ctx.connected.set(false);

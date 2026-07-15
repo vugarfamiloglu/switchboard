@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use crate::models::{Alert, Device, DeviceDetail, Fleet};
+use crate::models::{Alert, Device, DeviceDetail, Fleet, LogEntry};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS settings (
@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS alerts (
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_state ON alerts(state);
+CREATE TABLE IF NOT EXISTS logs (
+    id        TEXT PRIMARY KEY,
+    device_id TEXT,
+    ts        INTEGER NOT NULL,
+    level     TEXT NOT NULL DEFAULT 'info',
+    msg       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts);
 ";
 
 #[derive(Clone)]
@@ -365,6 +373,50 @@ impl Db {
     pub fn open_alert_count(&self) -> i64 {
         self.with(|c| c.query_row("SELECT COUNT(*) FROM alerts WHERE state IN ('open','acked')", [], |r| r.get(0)))
             .unwrap_or(0)
+    }
+
+    // ---- Logs ---------------------------------------------------------------
+
+    pub fn insert_log(&self, id: &str, device: &str, ts: i64, level: &str, msg: &str) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO logs(id,device_id,ts,level,msg) VALUES(?1,?2,?3,?4,?5)",
+                rusqlite::params![id, device, ts, level, msg],
+            )
+            .map(|_| ())
+        })
+    }
+
+    pub fn list_logs(&self, limit: i64) -> Vec<LogEntry> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT l.id,l.device_id,d.name,l.ts,l.level,l.msg
+                 FROM logs l LEFT JOIN devices d ON d.id = l.device_id
+                 ORDER BY l.ts DESC, l.id DESC LIMIT ?1",
+            )?;
+            let rows = stmt.query_map([limit], |r| {
+                Ok(LogEntry {
+                    id: r.get(0)?,
+                    device_id: r.get(1)?,
+                    device_name: r.get(2)?,
+                    ts: r.get(3)?,
+                    level: r.get(4)?,
+                    msg: r.get(5)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<LogEntry>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Keep only the most recent `keep` log rows.
+    pub fn prune_logs(&self, keep: i64) {
+        let _ = self.with(|c| {
+            c.execute(
+                "DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY ts DESC, id DESC LIMIT ?1)",
+                [keep],
+            )
+        });
     }
 }
 

@@ -299,6 +299,19 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .mini-btn { padding: 5px 12px; font-size: 12px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-muted); cursor: pointer; transition: all 140ms ease; }
 .mini-btn:hover { color: var(--amber); border-color: var(--amber); }
 
+/* Logs */
+.lvl-select { height: 38px; padding: 0 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text); font-size: 12px; cursor: pointer; }
+.logstream { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; font-size: 12.5px; }
+.logline { display: grid; grid-template-columns: 82px 160px 1fr; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.logline:last-child { border-bottom: 0; }
+.log-lvl { text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.1em; padding: 2px 7px; border-radius: var(--r-xs, 4px); text-align: center; }
+.log-info { background: var(--surface-2); color: var(--text-subtle); }
+.log-warning { background: var(--amber-soft); color: var(--amber); }
+.log-error { background: color-mix(in srgb, var(--alarm) 16%, transparent); color: var(--alarm); }
+.log-dev { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-msg { color: var(--text); }
+@media (max-width: 900px) { .logline { grid-template-columns: 70px 1fr; } .log-dev { display: none; } }
+
 @media (max-width: 900px) {
   .detail-grid { grid-template-columns: 1fr; }
   .dt-head, .dt-row { grid-template-columns: 0.9fr 1.4fr 1fr; }

@@ -5,6 +5,7 @@ pub mod alerts;
 pub mod auth;
 pub mod devices;
 pub mod fleets;
+pub mod logs;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -98,6 +99,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/alerts", get(alerts::list))
         .route("/alerts/{id}/ack", post(alerts::ack))
         .route("/alerts/{id}/resolve", post(alerts::resolve))
+        .route("/logs", get(logs::list))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

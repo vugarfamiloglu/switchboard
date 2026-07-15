@@ -138,6 +138,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/devices") view=Devices/>
                         <Route path=path!("/devices/:id") view=DeviceDetail/>
                         <Route path=path!("/alerts") view=Alerts/>
+                        <Route path=path!("/logs") view=Logs/>
                     </Routes>
                 </main>
             </div>
@@ -149,7 +150,7 @@ const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "#")]),
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "#")]),
     ("Delivery", &[("Config", "CF", "#"), ("Firmware", "FW", "#"), ("Commands", "CM", "#")]),
-    ("Observe", &[("Logs", "LG", "#"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
+    ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "#")]),
     ("Admin", &[("Team", "TM", "#"), ("Settings", "ST", "#")]),
 ];
@@ -403,6 +404,50 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[component]
+fn Logs() -> impl IntoView {
+    let live = use_live();
+    spawn_local(async move {
+        if let Ok(l) = api::logs().await {
+            live.logs.set(l);
+        }
+    });
+    let (q, set_q) = signal(String::new());
+    let (level, set_level) = signal(String::from("all"));
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Logs"</h1>
+            <p class="page-desc">"Live device log stream — newest first."</p>
+        </div></div>
+        <div class="toolbar">
+            <input class="search mono" placeholder="Filter logs…" prop:value=move || q.get() on:input=move |e| set_q.set(event_target_value(&e))/>
+            <select class="lvl-select mono" on:change=move |e| set_level.set(event_target_value(&e))>
+                <option value="all">"all levels"</option>
+                <option value="info">"info"</option>
+                <option value="warning">"warning"</option>
+                <option value="error">"error"</option>
+            </select>
+        </div>
+        <div class="logstream">
+            {move || {
+                let needle = q.get().to_lowercase();
+                let lv = level.get();
+                live.logs.get().into_iter()
+                    .filter(|l| (lv == "all" || l.level == lv)
+                        && (needle.is_empty() || format!("{} {}", l.msg, l.device_name.clone().unwrap_or_default()).to_lowercase().contains(&needle)))
+                    .map(|l| view! {
+                        <div class="logline mono">
+                            <span class=format!("log-lvl log-{}", l.level)>{l.level.clone()}</span>
+                            <span class="log-dev">{l.device_name.clone().unwrap_or_default()}</span>
+                            <span class="log-msg">{l.msg.clone()}</span>
+                        </div>
+                    }).collect_view()
+            }}
+        </div>
     }
 }
 

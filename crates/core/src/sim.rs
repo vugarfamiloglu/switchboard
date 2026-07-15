@@ -142,6 +142,27 @@ fn seed_metrics(p: &Profile, rng: &mut impl Rng) -> (HashMap<String, f64>, HashM
     (m, base)
 }
 
+fn log_line(s: &DevSim, rng: &mut impl Rng) -> (&'static str, String) {
+    if !s.online {
+        return ("error", "Connection lost — no heartbeat within the keepalive window".into());
+    }
+    let roll = rng.gen_range(0.0..1.0);
+    if roll < 0.07 {
+        ("warning", "RSSI degraded — backing off publish rate".into())
+    } else if roll < 0.10 {
+        ("error", "Publish acknowledgement timed out, retrying".into())
+    } else {
+        const INFO: &[&str] = &[
+            "Telemetry batch published",
+            "Heartbeat acknowledged by broker",
+            "Desired state reconciled",
+            "Sensor sample recorded",
+            "Time sync completed",
+        ];
+        ("info", INFO[rng.gen_range(0..INFO.len())].to_string())
+    }
+}
+
 pub struct Sim {
     hub: Hub,
     live: Live,
@@ -159,6 +180,8 @@ impl Sim {
 
     async fn run(self) {
         let devices = self.db.list_devices();
+        let names: HashMap<String, String> =
+            devices.iter().map(|d| (d.id.clone(), d.name.clone())).collect();
         let mut sims: Vec<DevSim> = {
             let mut rng = rand::thread_rng();
             devices
@@ -202,6 +225,25 @@ impl Sim {
             let frame = json!({ "type": "telemetry", "ts": ts, "data": { "devices": map, "aggregate": aggregate } });
             self.hub.broadcast(frame.to_string());
 
+            // Emit a couple of device log lines and stream them live.
+            {
+                let mut rng = rand::thread_rng();
+                for _ in 0..rng.gen_range(1..=2) {
+                    if sims.is_empty() {
+                        break;
+                    }
+                    let s = &sims[rng.gen_range(0..sims.len())];
+                    let (level, msg) = log_line(s, &mut rng);
+                    let id = format!("log_{}", ulid::Ulid::new().to_string().to_lowercase());
+                    let name = names.get(&s.id).cloned().unwrap_or_default();
+                    let _ = self.db.insert_log(&id, &s.id, ts, level, &msg);
+                    let frame = json!({ "type": "log", "ts": ts, "data": {
+                        "id": id, "deviceId": s.id, "deviceName": name, "ts": ts, "level": level, "msg": msg
+                    } });
+                    self.hub.broadcast(frame.to_string());
+                }
+            }
+
             if tick_no % TOUCH_EVERY == 0 {
                 for s in sims.iter().filter(|s| s.online) {
                     let reported = serde_json::to_string(&s.metrics).unwrap_or_else(|_| "{}".into());
@@ -210,6 +252,9 @@ impl Sim {
             }
             if tick_no % TOUCH_EVERY == 7 {
                 self.evaluate_alerts(&sims, ts);
+            }
+            if tick_no % 150 == 0 {
+                self.db.prune_logs(1500);
             }
         }
     }
