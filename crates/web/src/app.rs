@@ -154,6 +154,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/analytics") view=Analytics/>
                         <Route path=path!("/fleets") view=Fleets/>
                         <Route path=path!("/map") view=FleetMap/>
+                        <Route path=path!("/rules") view=Rules/>
                     </Routes>
                 </main>
             </div>
@@ -165,7 +166,7 @@ const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "/map")]),
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "/fleets")]),
     ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
-    ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
+    ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "/rules"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "/analytics")]),
     ("Admin", &[("Team", "TM", "/team"), ("Settings", "ST", "/settings")]),
 ];
@@ -1155,6 +1156,34 @@ fn Logs() -> impl IntoView {
                     }).collect_view()
             }}
         </div>
+    }
+}
+
+#[component]
+fn Rules() -> impl IntoView {
+    let rules = [
+        ("critical", "Device offline", "No telemetry received within the keepalive window", "Raise a critical alert; auto-resolve on reconnect"),
+        ("warning", "High temperature", "tempC exceeds 30 °C", "Raise a warning alert; auto-resolve when it cools"),
+        ("warning", "Low battery", "batteryPct drops below 15%", "Raise a warning alert; auto-resolve on charge"),
+    ];
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Rules"</h1>
+            <p class="page-desc">"Conditions the telemetry engine evaluates to raise alerts."</p>
+        </div></div>
+        <div class="cfg-grid">
+            {rules.iter().map(|(sev, name, cond, action)| {
+                let dot = if *sev == "critical" { "down" } else { "warn" };
+                view! {
+                    <div class="cfg-card">
+                        <div class="between"><div class="cfg-name">{*name}</div><span class=format!("dot dot-{}", dot)></span></div>
+                        <div class="rule-cond mono">{*cond}</div>
+                        <div class="rule-action">{*action}</div>
+                    </div>
+                }
+            }).collect_view()}
+        </div>
+        <p class="scaffold-note mono" style="margin-top:18px">"Built-in rules evaluate every ~30s. Custom user-defined rules are on the roadmap."</p>
     }
 }
 

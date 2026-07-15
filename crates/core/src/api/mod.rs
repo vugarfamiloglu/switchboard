@@ -86,6 +86,7 @@ pub fn routes(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
         .route("/ws", get(crate::ws::ws_handler))
+        .route("/ingest/{id}", post(devices::ingest))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me));

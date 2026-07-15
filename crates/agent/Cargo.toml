@@ -1,0 +1,13 @@
+[package]
+name = "switchboard-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "switchboard-agent"
+path = "src/main.rs"
+
+[dependencies]
+ureq = { version = "2", features = ["json"] }
+serde_json = "1"

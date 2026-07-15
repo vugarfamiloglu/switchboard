@@ -3,7 +3,7 @@
 # Later phases add `agent` (device agent) and `sim` (device simulator).
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/web"]
+members = ["crates/core", "crates/web", "crates/agent"]
 
 [workspace.package]
 version = "0.1.0"

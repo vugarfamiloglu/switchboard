@@ -558,6 +558,22 @@ impl Db {
         })
     }
 
+    /// Upsert a device reporting in via the agent ingest path: register it if new,
+    /// then record the reported twin and last-seen and mark it active.
+    pub fn ingest_device(&self, id: &str, name: &str, model: &str, reported: &str, now: i64) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO devices(id,name,model,status,created_at,updated_at) VALUES(?1,?2,?3,'active',?4,?4)",
+                rusqlite::params![id, name, model, now],
+            )?;
+            c.execute(
+                "UPDATE devices SET reported=?2, last_seen=?3, status='active' WHERE id=?1",
+                rusqlite::params![id, reported, now],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn device_exists(&self, id: &str) -> bool {
         self.with(|c| c.query_row("SELECT 1 FROM devices WHERE id=?1", [id], |_| Ok(())))
             .is_ok()
