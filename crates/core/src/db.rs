@@ -997,4 +997,47 @@ mod tests {
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn rules_crud_and_enabled_filter() {
+        let (db, dir) = temp_db();
+        db.create_rule("rule_hot", "Overheat", "tempC", "gt", 40.0, "critical", 100)
+            .unwrap();
+        db.create_rule("rule_low", "Low battery", "batteryPct", "lt", 10.0, "warning", 100)
+            .unwrap();
+        assert_eq!(db.rule_count(), 2);
+        assert_eq!(db.list_enabled_rules().len(), 2);
+
+        // Disabling drops a rule from the enabled set but not the full list.
+        assert_eq!(db.set_rule_enabled("rule_low", false).unwrap(), 1);
+        assert_eq!(db.list_rules().len(), 2);
+        let enabled = db.list_enabled_rules();
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].id, "rule_hot");
+        assert!((enabled[0].threshold - 40.0).abs() < f64::EPSILON);
+
+        // Delete removes it entirely.
+        assert_eq!(db.delete_rule("rule_hot").unwrap(), 1);
+        assert_eq!(db.rule_count(), 1);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rollback_campaign_is_terminal() {
+        let (db, dir) = temp_db();
+        db.create_campaign("ota_1", "fw_1", None, 100, 5, 100).unwrap();
+        // Running -> rolled_back on first rollback.
+        assert_eq!(db.rollback_campaign("ota_1", 200).unwrap(), 1);
+        let c = db
+            .list_campaigns()
+            .into_iter()
+            .find(|c| c.id == "ota_1")
+            .unwrap();
+        assert_eq!(c.status, "rolled_back");
+        // Second rollback is a no-op (already terminal).
+        assert_eq!(db.rollback_campaign("ota_1", 300).unwrap(), 0);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

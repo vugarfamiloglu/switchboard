@@ -216,6 +216,57 @@ mod tests {
         let (m, _) = seed_metrics(&profile_for("PathTag T4"), &mut rng);
         assert!(m.contains_key("batteryPct"));
     }
+
+    fn rule(id: &str, metric: &str, op: &str, threshold: f64) -> Rule {
+        Rule {
+            id: id.into(),
+            name: id.into(),
+            metric: metric.into(),
+            op: op.into(),
+            threshold,
+            severity: "warning".into(),
+            enabled: true,
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn custom_rule_fires_only_when_condition_holds() {
+        let mut metrics = HashMap::new();
+        metrics.insert("tempC".to_string(), 45.0);
+        let sim = DevSim {
+            id: "dev_x".into(),
+            metrics,
+            base: HashMap::new(),
+            online: true,
+            lat: 40.0,
+            lng: 49.0,
+        };
+        // 45 > 40 fires; 45 < 40 does not; a rule on an absent metric does not.
+        let rules = vec![
+            rule("hot", "tempC", "gt", 40.0),
+            rule("cold", "tempC", "lt", 40.0),
+            rule("batt", "batteryPct", "lt", 20.0),
+        ];
+        let faults = sim.fault_conditions(&rules);
+        assert_eq!(faults.len(), 1);
+        assert_eq!(faults[0].1, "hot");
+    }
+
+    #[test]
+    fn offline_device_reports_offline_and_skips_metric_rules() {
+        let sim = DevSim {
+            id: "dev_off".into(),
+            metrics: HashMap::new(),
+            base: HashMap::new(),
+            online: false,
+            lat: 40.0,
+            lng: 49.0,
+        };
+        let faults = sim.fault_conditions(&[rule("hot", "tempC", "gt", 40.0)]);
+        assert_eq!(faults.len(), 1);
+        assert_eq!(faults[0].1, "Device offline");
+    }
 }
 
 fn command_result(name: &str) -> (&'static str, String) {
