@@ -82,6 +82,26 @@ impl DevSim {
         false
     }
 
+    /// The active fault conditions (severity, title, detail) driving alerts.
+    fn fault_conditions(&self) -> Vec<(&'static str, &'static str, String)> {
+        let mut v = Vec::new();
+        if !self.online {
+            v.push(("critical", "Device offline", "No telemetry received from the device.".to_string()));
+            return v;
+        }
+        if let Some(t) = self.metrics.get("tempC") {
+            if *t > 30.0 {
+                v.push(("warning", "High temperature", format!("Temperature {:.1} C exceeds the 30 C threshold.", t)));
+            }
+        }
+        if let Some(b) = self.metrics.get("batteryPct") {
+            if *b < 15.0 {
+                v.push(("warning", "Low battery", format!("Battery at {:.0}% (below 15%).", b)));
+            }
+        }
+        v
+    }
+
     fn live(&self, ts: i64) -> DeviceLive {
         DeviceLive {
             online: self.online,
@@ -186,6 +206,30 @@ impl Sim {
                 for s in sims.iter().filter(|s| s.online) {
                     let reported = serde_json::to_string(&s.metrics).unwrap_or_else(|_| "{}".into());
                     let _ = self.db.touch_device(&s.id, &reported, ts);
+                }
+            }
+            if tick_no % TOUCH_EVERY == 7 {
+                self.evaluate_alerts(&sims, ts);
+            }
+        }
+    }
+
+    /// Raise alerts for newly-faulted devices and resolve those whose condition
+    /// has cleared. Deduplicated on (device, title) so an open alert isn't
+    /// re-raised each cycle.
+    fn evaluate_alerts(&self, sims: &[DevSim], now: i64) {
+        for s in sims {
+            let conds = s.fault_conditions();
+            for (severity, title, detail) in &conds {
+                if !self.db.open_alert_exists(&s.id, title) {
+                    let id = format!("alr_{}", ulid::Ulid::new().to_string().to_lowercase());
+                    let _ = self.db.insert_alert(&id, &s.id, severity, title, detail, now);
+                }
+            }
+            let active: Vec<&str> = conds.iter().map(|c| c.1).collect();
+            for (id, title) in self.db.open_alerts_for(&s.id) {
+                if !active.contains(&title.as_str()) {
+                    let _ = self.db.set_alert_state(&id, "resolved", now);
                 }
             }
         }

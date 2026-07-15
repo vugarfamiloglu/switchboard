@@ -95,6 +95,19 @@ pub struct Fleet {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Alert {
+    pub id: String,
+    pub device_id: Option<String>,
+    pub device_name: Option<String>,
+    pub severity: String,
+    pub title: String,
+    pub detail: String,
+    pub state: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceLive {
     pub online: bool,
     pub last_seen: i64,
@@ -143,4 +156,12 @@ pub async fn device(id: &str) -> Result<DeviceDetail, String> {
 
 pub async fn live_snapshot() -> Result<Telemetry, String> {
     get_json("/api/live").await
+}
+
+pub async fn alerts() -> Result<Vec<Alert>, String> {
+    get_json("/api/alerts").await
+}
+
+pub async fn alert_action(id: &str, action: &str) -> Result<serde_json::Value, String> {
+    post_json(&format!("/api/alerts/{id}/{action}"), &serde_json::json!({})).await
 }

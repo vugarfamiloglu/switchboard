@@ -137,6 +137,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/") view=Overview/>
                         <Route path=path!("/devices") view=Devices/>
                         <Route path=path!("/devices/:id") view=DeviceDetail/>
+                        <Route path=path!("/alerts") view=Alerts/>
                     </Routes>
                 </main>
             </div>
@@ -148,7 +149,7 @@ const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "#")]),
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "#")]),
     ("Delivery", &[("Config", "CF", "#"), ("Firmware", "FW", "#"), ("Commands", "CM", "#")]),
-    ("Observe", &[("Logs", "LG", "#"), ("Rules", "RL", "#"), ("Alerts", "AL", "#")]),
+    ("Observe", &[("Logs", "LG", "#"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "#")]),
     ("Admin", &[("Team", "TM", "#"), ("Settings", "ST", "#")]),
 ];
@@ -402,6 +403,62 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[component]
+fn Alerts() -> impl IntoView {
+    let auth = use_auth();
+    let alerts = RwSignal::new(Vec::<api::Alert>::new());
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(a) = api::alerts().await {
+                alerts.set(a);
+            }
+        });
+    };
+    reload();
+    let can_write = move || auth.role.get() != "viewer";
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Alerts"</h1>
+            <p class="page-desc">"Faults raised across the fleet — acknowledge and resolve."</p>
+        </div></div>
+        <div class="alert-list">
+            {move || {
+                let items = alerts.get();
+                if items.is_empty() {
+                    return view! { <div class="empty">"No alerts. All clear."</div> }.into_any();
+                }
+                items.into_iter().map(|a| {
+                    let sev = match a.severity.as_str() { "critical" => "down", "warning" => "warn", _ => "idle" };
+                    let can = can_write() && a.state != "resolved";
+                    let is_open = a.state == "open";
+                    let id = a.id.clone();
+                    view! {
+                        <div class=format!("alert-row alert-{}", a.state)>
+                            <span class=format!("dot dot-{}", sev)></span>
+                            <div class="grow">
+                                <div class="alert-title">{a.title.clone()}" "<span class="alert-dev mono">{a.device_name.clone().unwrap_or_default()}</span></div>
+                                <div class="alert-detail">{a.detail.clone()}</div>
+                            </div>
+                            <span class=format!("pill pill-state-{}", a.state)>{a.state.clone()}</span>
+                            {can.then(|| {
+                                let id_a = id.clone();
+                                let id_r = id.clone();
+                                view! {
+                                    <div class="alert-acts">
+                                        {is_open.then(|| view! { <button class="mini-btn" on:click=move |_| { let id = id_a.clone(); spawn_local(async move { let _ = api::alert_action(&id, "ack").await; reload(); }); }>"Ack"</button> })}
+                                        <button class="mini-btn" on:click=move |_| { let id = id_r.clone(); spawn_local(async move { let _ = api::alert_action(&id, "resolve").await; reload(); }); }>"Resolve"</button>
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+                }).collect_view().into_any()
+            }}
+        </div>
     }
 }
 

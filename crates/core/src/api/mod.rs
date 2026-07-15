@@ -1,6 +1,7 @@
 //! HTTP API — response envelope, router, session cookies, and the RBAC
 //! write-guard middleware.
 
+pub mod alerts;
 pub mod auth;
 pub mod devices;
 pub mod fleets;
@@ -94,6 +95,9 @@ pub fn routes(state: AppState) -> Router {
         .route("/devices/{id}/twin", post(devices::set_twin))
         .route("/fleets", get(fleets::list).post(fleets::create))
         .route("/fleets/{id}", delete(fleets::delete))
+        .route("/alerts", get(alerts::list))
+        .route("/alerts/{id}/ack", post(alerts::ack))
+        .route("/alerts/{id}/resolve", post(alerts::resolve))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

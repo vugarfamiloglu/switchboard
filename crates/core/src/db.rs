@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use crate::models::{Device, DeviceDetail, Fleet};
+use crate::models::{Alert, Device, DeviceDetail, Fleet};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS settings (
@@ -51,6 +51,17 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_devices_fleet ON devices(fleet_id);
+CREATE TABLE IF NOT EXISTS alerts (
+    id         TEXT PRIMARY KEY,
+    device_id  TEXT,
+    severity   TEXT NOT NULL DEFAULT 'warning',
+    title      TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '',
+    state      TEXT NOT NULL DEFAULT 'open',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_state ON alerts(state);
 ";
 
 #[derive(Clone)]
@@ -285,6 +296,74 @@ impl Db {
 
     pub fn device_count(&self) -> i64 {
         self.with(|c| c.query_row("SELECT COUNT(*) FROM devices", [], |r| r.get(0)))
+            .unwrap_or(0)
+    }
+
+    // ---- Alerts -------------------------------------------------------------
+
+    pub fn list_alerts(&self) -> Vec<Alert> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT a.id,a.device_id,d.name,a.severity,a.title,a.detail,a.state,a.created_at
+                 FROM alerts a LEFT JOIN devices d ON d.id = a.device_id
+                 ORDER BY CASE a.state WHEN 'open' THEN 0 WHEN 'acked' THEN 1 ELSE 2 END, a.created_at DESC
+                 LIMIT 300",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(Alert {
+                    id: r.get(0)?,
+                    device_id: r.get(1)?,
+                    device_name: r.get(2)?,
+                    severity: r.get(3)?,
+                    title: r.get(4)?,
+                    detail: r.get(5)?,
+                    state: r.get(6)?,
+                    created_at: r.get(7)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<Alert>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn open_alert_exists(&self, device: &str, title: &str) -> bool {
+        self.with(|c| {
+            c.query_row(
+                "SELECT 1 FROM alerts WHERE device_id=?1 AND title=?2 AND state IN ('open','acked') LIMIT 1",
+                (device, title),
+                |_| Ok(()),
+            )
+        })
+        .is_ok()
+    }
+
+    pub fn insert_alert(&self, id: &str, device: &str, severity: &str, title: &str, detail: &str, now: i64) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO alerts(id,device_id,severity,title,detail,state,created_at,updated_at)
+                 VALUES(?1,?2,?3,?4,?5,'open',?6,?6)",
+                rusqlite::params![id, device, severity, title, detail, now],
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// Open/acked alerts for a device as (id, title) — used to resolve cleared ones.
+    pub fn open_alerts_for(&self, device: &str) -> Vec<(String, String)> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT id,title FROM alerts WHERE device_id=?1 AND state IN ('open','acked')")?;
+            let rows = stmt.query_map([device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            rows.collect::<rusqlite::Result<Vec<(String, String)>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn set_alert_state(&self, id: &str, state: &str, now: i64) -> rusqlite::Result<usize> {
+        self.with(|c| c.execute("UPDATE alerts SET state=?2, updated_at=?3 WHERE id=?1", rusqlite::params![id, state, now]))
+    }
+
+    pub fn open_alert_count(&self) -> i64 {
+        self.with(|c| c.query_row("SELECT COUNT(*) FROM alerts WHERE state IN ('open','acked')", [], |r| r.get(0)))
             .unwrap_or(0)
     }
 }
