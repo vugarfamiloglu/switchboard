@@ -1,0 +1,17 @@
+# Trunk builds the Leptos SPA to `dist/`, which the Axum core serves in prod.
+[build]
+dist = "dist"
+
+# Dev server: `trunk serve` on 7931, proxying /api and /ws to the core on 7930.
+[serve]
+port = 7931
+open = false
+
+[[proxy]]
+rewrite = "/api/"
+backend = "http://127.0.0.1:7930/api/"
+
+[[proxy]]
+rewrite = "/ws"
+backend = "ws://127.0.0.1:7930/ws"
+ws = true
