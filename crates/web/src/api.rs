@@ -108,6 +108,19 @@ pub struct Alert {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Command {
+    pub id: String,
+    pub device_id: String,
+    pub device_name: Option<String>,
+    pub name: String,
+    pub args: String,
+    pub status: String,
+    pub result: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     pub id: String,
     pub device_id: Option<String>,
@@ -179,4 +192,12 @@ pub async fn alert_action(id: &str, action: &str) -> Result<serde_json::Value, S
 
 pub async fn logs() -> Result<Vec<LogEntry>, String> {
     get_json("/api/logs").await
+}
+
+pub async fn commands() -> Result<Vec<Command>, String> {
+    get_json("/api/commands").await
+}
+
+pub async fn send_command(device: &str, name: &str) -> Result<serde_json::Value, String> {
+    post_json(&format!("/api/devices/{device}/command"), &serde_json::json!({ "name": name })).await
 }

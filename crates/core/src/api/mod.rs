@@ -3,6 +3,7 @@
 
 pub mod alerts;
 pub mod auth;
+pub mod commands;
 pub mod devices;
 pub mod fleets;
 pub mod logs;
@@ -100,6 +101,8 @@ pub fn routes(state: AppState) -> Router {
         .route("/alerts/{id}/ack", post(alerts::ack))
         .route("/alerts/{id}/resolve", post(alerts::resolve))
         .route("/logs", get(logs::list))
+        .route("/commands", get(commands::list))
+        .route("/devices/{id}/command", post(commands::send))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

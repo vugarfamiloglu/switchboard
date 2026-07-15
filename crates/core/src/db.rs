@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use crate::models::{Alert, Device, DeviceDetail, Fleet, LogEntry};
+use crate::models::{Alert, Command, Device, DeviceDetail, Fleet, LogEntry};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS settings (
@@ -70,6 +70,17 @@ CREATE TABLE IF NOT EXISTS logs (
     msg       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts);
+CREATE TABLE IF NOT EXISTS commands (
+    id         TEXT PRIMARY KEY,
+    device_id  TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    args       TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending',
+    result     TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_commands_device ON commands(device_id);
 ";
 
 #[derive(Clone)]
@@ -418,6 +429,71 @@ impl Db {
             )
         });
     }
+
+    // ---- Commands -----------------------------------------------------------
+
+    pub fn insert_command(&self, id: &str, device: &str, name: &str, args: &str, now: i64) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO commands(id,device_id,name,args,status,result,created_at,updated_at)
+                 VALUES(?1,?2,?3,?4,'pending','',?5,?5)",
+                rusqlite::params![id, device, name, args, now],
+            )
+            .map(|_| ())
+        })
+    }
+
+    pub fn list_commands(&self, limit: i64) -> Vec<Command> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT c.id,c.device_id,d.name,c.name,c.args,c.status,c.result,c.created_at
+                 FROM commands c LEFT JOIN devices d ON d.id = c.device_id
+                 ORDER BY c.created_at DESC, c.id DESC LIMIT ?1",
+            )?;
+            let rows = stmt.query_map([limit], row_to_command)?;
+            rows.collect::<rusqlite::Result<Vec<Command>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Pending commands as (id, device_id, name) for the sim to fulfil.
+    pub fn list_pending_commands(&self) -> Vec<(String, String, String)> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT id,device_id,name FROM commands WHERE status='pending'")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<(String, String, String)>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn complete_command(&self, id: &str, status: &str, result: &str, now: i64) -> rusqlite::Result<usize> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE commands SET status=?2, result=?3, updated_at=?4 WHERE id=?1",
+                rusqlite::params![id, status, result, now],
+            )
+        })
+    }
+
+    pub fn device_exists(&self, id: &str) -> bool {
+        self.with(|c| c.query_row("SELECT 1 FROM devices WHERE id=?1", [id], |_| Ok(())))
+            .is_ok()
+    }
+}
+
+fn row_to_command(r: &rusqlite::Row) -> rusqlite::Result<Command> {
+    Ok(Command {
+        id: r.get(0)?,
+        device_id: r.get(1)?,
+        device_name: r.get(2)?,
+        name: r.get(3)?,
+        args: r.get(4)?,
+        status: r.get(5)?,
+        result: r.get(6)?,
+        created_at: r.get(7)?,
+    })
 }
 
 fn row_to_device(r: &rusqlite::Row) -> rusqlite::Result<Device> {

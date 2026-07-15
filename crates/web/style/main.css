@@ -312,6 +312,13 @@ html, body { margin: 0; padding: 0; height: 100%; }
 .log-msg { color: var(--text); }
 @media (max-width: 900px) { .logline { grid-template-columns: 70px 1fr; } .log-dev { display: none; } }
 
+/* Commands */
+.cmd-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.cmd-cols { grid-template-columns: 0.9fr 1.4fr 0.9fr 2fr; }
+.cmd-row { cursor: default; }
+.cmd-row:hover { background: var(--surface); }
+@media (max-width: 900px) { .cmd-cols { grid-template-columns: 0.9fr 1.2fr 1.4fr; } .cmd-cols span:nth-child(3) { display: none; } }
+
 @media (max-width: 900px) {
   .detail-grid { grid-template-columns: 1fr; }
   .dt-head, .dt-row { grid-template-columns: 0.9fr 1.4fr 1fr; }

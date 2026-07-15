@@ -139,6 +139,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/devices/:id") view=DeviceDetail/>
                         <Route path=path!("/alerts") view=Alerts/>
                         <Route path=path!("/logs") view=Logs/>
+                        <Route path=path!("/commands") view=Commands/>
                     </Routes>
                 </main>
             </div>
@@ -149,7 +150,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
 const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "#")]),
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "#")]),
-    ("Delivery", &[("Config", "CF", "#"), ("Firmware", "FW", "#"), ("Commands", "CM", "#")]),
+    ("Delivery", &[("Config", "CF", "#"), ("Firmware", "FW", "#"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "#")]),
     ("Admin", &[("Team", "TM", "#"), ("Settings", "ST", "#")]),
@@ -404,6 +405,74 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[component]
+fn Commands() -> impl IntoView {
+    let auth = use_auth();
+    let devices = RwSignal::new(Vec::<Device>::new());
+    let cmds = RwSignal::new(Vec::<api::Command>::new());
+    let (sel, set_sel) = signal(String::new());
+    spawn_local(async move {
+        if let Ok(d) = api::devices().await {
+            if let Some(first) = d.first() {
+                set_sel.set(first.id.clone());
+            }
+            devices.set(d);
+        }
+    });
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(c) = api::commands().await {
+                cmds.set(c);
+            }
+        });
+    };
+    reload();
+    let can_write = move || auth.role.get() != "viewer";
+    let send = move |name: &'static str| {
+        let device = sel.get();
+        if device.is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            let _ = api::send_command(&device, name).await;
+            gloo_timers::future::TimeoutFuture::new(2600).await;
+            reload();
+        });
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Commands"</h1>
+            <p class="page-desc">"Send remote commands and review the response history."</p>
+        </div></div>
+        {move || can_write().then(|| view! {
+            <div class="cmd-bar">
+                <select class="lvl-select mono" on:change=move |e| set_sel.set(event_target_value(&e))>
+                    {move || devices.get().into_iter().map(|d| view! { <option value=d.id.clone()>{d.name.clone()}</option> }).collect_view()}
+                </select>
+                <button class="mini-btn" on:click=move |_| send("reboot")>"Reboot"</button>
+                <button class="mini-btn" on:click=move |_| send("ping")>"Ping"</button>
+                <button class="mini-btn" on:click=move |_| send("sync")>"Sync"</button>
+                <button class="mini-btn" on:click=move |_| send("identify")>"Identify"</button>
+            </div>
+        })}
+        <div class="dtable">
+            <div class="dt-head mono cmd-cols"><span>"STATUS"</span><span>"DEVICE"</span><span>"COMMAND"</span><span>"RESULT"</span></div>
+            {move || cmds.get().into_iter().map(|c| {
+                let pill = if c.status == "completed" { "resolved" } else if c.status == "failed" { "open" } else { "acked" };
+                view! {
+                    <div class="dt-row cmd-cols cmd-row">
+                        <span><span class=format!("pill pill-state-{}", pill)>{c.status.clone()}</span></span>
+                        <span class="cell-strong">{c.device_name.clone().unwrap_or_default()}</span>
+                        <span class="mono">{c.name.clone()}</span>
+                        <span class="u-muted">{c.result.clone()}</span>
+                    </div>
+                }
+            }).collect_view()}
+        </div>
     }
 }
 

@@ -142,6 +142,17 @@ fn seed_metrics(p: &Profile, rng: &mut impl Rng) -> (HashMap<String, f64>, HashM
     (m, base)
 }
 
+fn command_result(name: &str) -> (&'static str, String) {
+    let msg = match name {
+        "reboot" => "Reboot initiated; device will reconnect shortly",
+        "ping" => "pong · rtt 41ms",
+        "sync" => "Desired state pulled and applied",
+        "identify" => "Indicator LED blinked for 5s",
+        _ => "OK",
+    };
+    ("completed", msg.to_string())
+}
+
 fn log_line(s: &DevSim, rng: &mut impl Rng) -> (&'static str, String) {
     if !s.online {
         return ("error", "Connection lost — no heartbeat within the keepalive window".into());
@@ -242,6 +253,17 @@ impl Sim {
                     } });
                     self.hub.broadcast(frame.to_string());
                 }
+            }
+
+            // Fulfil pending commands (a device responds unless it is offline).
+            for (id, device, name) in self.db.list_pending_commands() {
+                let online = sims.iter().find(|s| s.id == device).map(|s| s.online).unwrap_or(false);
+                let (status, result) = if online {
+                    command_result(&name)
+                } else {
+                    ("failed", "device is offline".to_string())
+                };
+                let _ = self.db.complete_command(&id, status, &result, ts);
             }
 
             if tick_no % TOUCH_EVERY == 0 {

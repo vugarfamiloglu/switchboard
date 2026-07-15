@@ -45,6 +45,19 @@ pub struct Alert {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Command {
+    pub id: String,
+    pub device_id: String,
+    pub device_name: Option<String>,
+    pub name: String,
+    pub args: String,
+    pub status: String,
+    pub result: String,
+    pub created_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     pub id: String,
     pub device_id: Option<String>,
