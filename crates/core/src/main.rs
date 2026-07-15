@@ -10,6 +10,7 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod models;
 mod sim;
 mod state;
 mod vault;
@@ -46,7 +47,13 @@ async fn main() -> anyhow::Result<()> {
         auth::hash_passcode(cfg.passcode_override.as_deref().unwrap_or(DEFAULT_PASSCODE))
     })?;
     ensure_operators(&db)?;
-    tracing::info!("database ready at {} · {} operators seeded", cfg.db_path(), db.operator_count());
+    ensure_demo_estate(&db)?;
+    tracing::info!(
+        "database ready at {} · {} operators · {} devices",
+        cfg.db_path(),
+        db.operator_count(),
+        db.device_count()
+    );
 
     let hub = ws::Hub::new();
     sim::Sim::new(hub.clone()).spawn();
@@ -107,6 +114,43 @@ fn ensure_operators(db: &Db) -> anyhow::Result<()> {
     ];
     for (id, name, email, role) in seed {
         db.insert_operator(id, name, email, role, &hash, now)?;
+    }
+    Ok(())
+}
+
+/// Seed a demo estate (fleets + devices) on first boot so the console has data.
+fn ensure_demo_estate(db: &Db) -> anyhow::Result<()> {
+    if db.device_count() > 0 {
+        return Ok(());
+    }
+    let now = auth::now();
+    let fleets = [
+        ("flt_hvac", "HVAC Controllers", "Building climate controllers"),
+        ("flt_meters", "Smart Meters", "Grid and water meters"),
+        ("flt_trackers", "Asset Trackers", "Fleet GPS trackers"),
+    ];
+    for (id, name, desc) in fleets {
+        db.create_fleet(id, name, desc, now)?;
+    }
+    let devices = [
+        ("Rooftop AHU-01", "AeroTherm X3", "2.4.1", "flt_hvac", "baku,rooftop"),
+        ("Rooftop AHU-02", "AeroTherm X3", "2.4.1", "flt_hvac", "baku,rooftop"),
+        ("Chiller Plant-A", "AeroTherm C9", "3.1.0", "flt_hvac", "baku,plant"),
+        ("Chiller Plant-B", "AeroTherm C9", "3.0.7", "flt_hvac", "ganja,plant"),
+        ("Boiler Room-1", "AeroTherm B2", "1.9.4", "flt_hvac", "sumqayit"),
+        ("Grid Meter-4471", "VoltEdge M1", "5.2.0", "flt_meters", "baku,grid"),
+        ("Grid Meter-4472", "VoltEdge M1", "5.2.0", "flt_meters", "baku,grid"),
+        ("Water Meter-118", "AquaPulse W2", "2.0.3", "flt_meters", "ganja,water"),
+        ("Water Meter-119", "AquaPulse W2", "2.0.3", "flt_meters", "ganja,water"),
+        ("Substation Meter-7", "VoltEdge M3", "5.4.1", "flt_meters", "sumqayit,grid"),
+        ("Tracker Truck-12", "PathTag T4", "4.0.2", "flt_trackers", "fleet,truck"),
+        ("Tracker Truck-19", "PathTag T4", "4.0.2", "flt_trackers", "fleet,truck"),
+        ("Tracker Van-03", "PathTag T4", "4.0.1", "flt_trackers", "fleet,van"),
+        ("Tracker Reefer-08", "PathTag T7", "4.3.0", "flt_trackers", "fleet,reefer"),
+    ];
+    for (name, model, fw, fleet, tags) in devices {
+        let id = format!("dev_{}", ulid::Ulid::new().to_string().to_lowercase());
+        db.create_device(&id, name, model, fw, Some(fleet), &api::devices::claim_code(), tags, now)?;
     }
     Ok(())
 }

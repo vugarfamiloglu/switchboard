@@ -2,13 +2,15 @@
 //! write-guard middleware.
 
 pub mod auth;
+pub mod devices;
+pub mod fleets;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Serialize;
 use serde_json::json;
@@ -81,6 +83,11 @@ pub fn routes(state: AppState) -> Router {
     // this group in later phases.
     let protected = Router::new()
         .route("/whoami", get(auth::whoami))
+        .route("/devices", get(devices::list).post(devices::create))
+        .route("/devices/{id}", get(devices::get_one).put(devices::update).delete(devices::delete))
+        .route("/devices/{id}/twin", post(devices::set_twin))
+        .route("/fleets", get(fleets::list).post(fleets::create))
+        .route("/fleets/{id}", delete(fleets::delete))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
