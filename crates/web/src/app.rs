@@ -21,6 +21,12 @@ fn use_auth() -> Auth {
     use_context::<Auth>().expect("Auth provided at app root")
 }
 
+#[derive(Clone, Copy)]
+struct ThemeCtx {
+    theme: ReadSignal<String>,
+    set: WriteSignal<String>,
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let auth = Auth {
@@ -43,6 +49,7 @@ pub fn App() -> impl IntoView {
     });
 
     let (theme, set_theme) = signal(String::from("dark"));
+    provide_context(ThemeCtx { theme, set: set_theme });
 
     view! {
         <div class=move || format!("app-root theme-{}", theme.get())>
@@ -143,6 +150,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/config") view=Config/>
                         <Route path=path!("/firmware") view=Firmware/>
                         <Route path=path!("/team") view=Team/>
+                        <Route path=path!("/settings") view=Settings/>
                     </Routes>
                 </main>
             </div>
@@ -156,7 +164,7 @@ const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "#")]),
-    ("Admin", &[("Team", "TM", "/team"), ("Settings", "ST", "#")]),
+    ("Admin", &[("Team", "TM", "/team"), ("Settings", "ST", "/settings")]),
 ];
 
 #[component]
@@ -408,6 +416,98 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[component]
+fn Settings() -> impl IntoView {
+    let auth = use_auth();
+    let theme = use_context::<ThemeCtx>().expect("ThemeCtx");
+    let (cur, set_cur) = signal(String::new());
+    let (next, set_next) = signal(String::new());
+    let (msg, set_msg) = signal(String::new());
+    let (wh, set_wh) = signal(String::new());
+    let (wh_msg, set_wh_msg) = signal(String::new());
+    spawn_local(async move {
+        if let Ok(v) = api::get_webhook().await {
+            if let Some(u) = v.get("url").and_then(|u| u.as_str()) {
+                set_wh.set(u.to_string());
+            }
+        }
+    });
+    let can_write = move || auth.role.get() != "viewer";
+
+    let change_pass = move |_| {
+        let (c, n) = (cur.get(), next.get());
+        if n.len() < 6 {
+            set_msg.set("New passcode must be at least 6 characters".into());
+            return;
+        }
+        spawn_local(async move {
+            match api::change_passcode(&c, &n).await {
+                Ok(_) => {
+                    set_msg.set("Passcode updated".into());
+                    set_cur.set(String::new());
+                    set_next.set(String::new());
+                }
+                Err(e) => set_msg.set(e),
+            }
+        });
+    };
+    let save_wh = move |_| {
+        let u = wh.get();
+        spawn_local(async move {
+            match api::set_webhook(&u).await {
+                Ok(_) => set_wh_msg.set("Webhook saved".into()),
+                Err(e) => set_wh_msg.set(e),
+            }
+        });
+    };
+    let backup = move |_| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.location().set_href("/api/backup");
+        }
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Settings"</h1>
+            <p class="page-desc">"Console appearance, security, and integrations."</p>
+        </div></div>
+        <div class="set-grid">
+            <div class="panel">
+                <div class="panel-title">"Appearance & data"</div>
+                <div class="set-row">
+                    <div><div class="set-name">"Theme"</div><div class="set-sub">"Operations bunker (dark) or field manual (light)."</div></div>
+                    <div class="row gap-2">
+                        <button class=move || if theme.theme.get() == "light" { "btn btn-inline btn-primary" } else { "btn btn-inline" } on:click=move |_| theme.set.set("light".into())>"Light"</button>
+                        <button class=move || if theme.theme.get() == "dark" { "btn btn-inline btn-primary" } else { "btn btn-inline" } on:click=move |_| theme.set.set("dark".into())>"Dark"</button>
+                    </div>
+                </div>
+                <div class="set-row">
+                    <div><div class="set-name">"Backup"</div><div class="set-sub">"Download a clean SQLite snapshot."</div></div>
+                    <button class="btn btn-inline" on:click=backup>"Download"</button>
+                </div>
+            </div>
+            {move || can_write().then(|| view! {
+                <div class="panel">
+                    <div class="panel-title">"Security"</div>
+                    <label class="field"><span class="field-label mono">"CURRENT PASSCODE"</span><input class="input mono" type="password" prop:value=move || cur.get() on:input=move |e| set_cur.set(event_target_value(&e))/></label>
+                    <label class="field"><span class="field-label mono">"NEW PASSCODE"</span><input class="input mono" type="password" prop:value=move || next.get() on:input=move |e| set_next.set(event_target_value(&e))/></label>
+                    <button class="btn btn-primary btn-inline set-btn" on:click=change_pass>"Update passcode"</button>
+                    {move || (!msg.get().is_empty()).then(|| view! { <div class="cfg-msg mono">{msg.get()}</div> })}
+                </div>
+            })}
+            {move || can_write().then(|| view! {
+                <div class="panel">
+                    <div class="panel-title">"Alert webhook"</div>
+                    <p class="set-sub">"Endpoint notified when alerts fire (integration point)."</p>
+                    <label class="field"><span class="field-label mono">"ENDPOINT URL"</span><input class="input mono" type="url" placeholder="https://hooks.example.com/switchboard" prop:value=move || wh.get() on:input=move |e| set_wh.set(event_target_value(&e))/></label>
+                    <button class="btn btn-primary btn-inline set-btn" on:click=save_wh>"Save webhook"</button>
+                    {move || (!wh_msg.get().is_empty()).then(|| view! { <div class="cfg-msg mono">{wh_msg.get()}</div> })}
+                </div>
+            })}
+        </div>
     }
 }
 

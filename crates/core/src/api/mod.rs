@@ -9,6 +9,7 @@ pub mod devices;
 pub mod fleets;
 pub mod logs;
 pub mod operators;
+pub mod settings;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -113,6 +114,9 @@ pub fn routes(state: AppState) -> Router {
         .route("/ota", get(delivery::list_campaigns).post(delivery::create_campaign))
         .route("/operators", get(operators::list).post(operators::create))
         .route("/operators/{id}", put(operators::update).delete(operators::delete))
+        .route("/auth/passcode", post(settings::change_passcode))
+        .route("/backup", get(settings::backup))
+        .route("/webhook", get(settings::get_webhook).put(settings::set_webhook))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

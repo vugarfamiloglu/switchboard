@@ -45,6 +45,21 @@ pub async fn post_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) 
     }
 }
 
+pub async fn put_json<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Result<T, String> {
+    let resp = Request::put(path)
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let env: Envelope<T> = resp.json().await.map_err(|e| e.to_string())?;
+    if env.ok {
+        env.data.ok_or_else(|| "empty response".to_string())
+    } else {
+        Err(env.error.unwrap_or_else(|| "request failed".into()))
+    }
+}
+
 pub async fn del_json<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     let resp = Request::delete(path).send().await.map_err(|e| e.to_string())?;
     let env: Envelope<T> = resp.json().await.map_err(|e| e.to_string())?;
@@ -296,6 +311,18 @@ pub async fn create_operator(name: &str, email: &str, role: &str, password: &str
 
 pub async fn delete_operator(id: &str) -> Result<serde_json::Value, String> {
     del_json(&format!("/api/operators/{id}")).await
+}
+
+pub async fn change_passcode(current: &str, next: &str) -> Result<serde_json::Value, String> {
+    post_json("/api/auth/passcode", &serde_json::json!({ "current": current, "next": next })).await
+}
+
+pub async fn get_webhook() -> Result<serde_json::Value, String> {
+    get_json("/api/webhook").await
+}
+
+pub async fn set_webhook(url: &str) -> Result<serde_json::Value, String> {
+    put_json("/api/webhook", &serde_json::json!({ "url": url })).await
 }
 
 pub async fn create_campaign(firmware: &str, fleet: Option<String>, canary: i64) -> Result<serde_json::Value, String> {

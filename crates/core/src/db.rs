@@ -141,6 +141,17 @@ impl Db {
             .ok()
     }
 
+    /// A clean SQLite snapshot (VACUUM INTO) returned as bytes, for backup.
+    pub fn snapshot(&self, data_dir: &str) -> Result<Vec<u8>, String> {
+        let tmp = format!("{}/backup-{}.db", data_dir, ulid::Ulid::new());
+        let escaped = tmp.replace('\'', "''");
+        self.with(|c| c.execute_batch(&format!("VACUUM INTO '{escaped}'")))
+            .map_err(|e| e.to_string())?;
+        let bytes = std::fs::read(&tmp).map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&tmp);
+        Ok(bytes)
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
         self.with(|c| {
             c.execute(
