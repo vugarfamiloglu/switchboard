@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::db::Db;
+use crate::live::Live;
 use crate::vault::Vault;
 use crate::ws::Hub;
 
@@ -16,4 +17,6 @@ pub struct AppState {
     pub secret: Arc<String>,
     /// Live telemetry fan-out to connected consoles.
     pub hub: Hub,
+    /// Latest per-device telemetry snapshot + fleet aggregate.
+    pub live: Live,
 }

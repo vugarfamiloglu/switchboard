@@ -10,6 +10,7 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod live;
 mod models;
 mod sim;
 mod state;
@@ -56,7 +57,8 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let hub = ws::Hub::new();
-    sim::Sim::new(hub.clone()).spawn();
+    let live = live::Live::new();
+    sim::Sim::new(hub.clone(), live.clone(), db.clone()).spawn();
 
     let port = cfg.port;
     let state = AppState {
@@ -65,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         vault,
         secret: Arc::new(secret),
         hub,
+        live,
     };
     let app = router(state);
 

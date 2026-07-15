@@ -70,6 +70,11 @@ async fn health() -> Response {
     ok(json!({ "service": "switchboard", "version": env!("CARGO_PKG_VERSION") }))
 }
 
+/// Current live snapshot for initial console load before the WS stream kicks in.
+async fn live_snapshot(State(state): State<AppState>) -> Response {
+    ok(json!({ "devices": state.live.devices(), "aggregate": state.live.aggregate() }))
+}
+
 pub fn routes(state: AppState) -> Router {
     // Public endpoints (no session required).
     let public = Router::new()
@@ -83,6 +88,7 @@ pub fn routes(state: AppState) -> Router {
     // this group in later phases.
     let protected = Router::new()
         .route("/whoami", get(auth::whoami))
+        .route("/live", get(live_snapshot))
         .route("/devices", get(devices::list).post(devices::create))
         .route("/devices/{id}", get(devices::get_one).put(devices::update).delete(devices::delete))
         .route("/devices/{id}/twin", post(devices::set_twin))
