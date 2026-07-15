@@ -45,6 +45,41 @@ pub struct Alert {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfigProfile {
+    pub id: String,
+    pub name: String,
+    pub values: Value,
+    pub created_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Firmware {
+    pub id: String,
+    pub model: String,
+    pub version: String,
+    pub size_kb: i64,
+    pub sha256: String,
+    pub created_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtaCampaign {
+    pub id: String,
+    pub firmware_id: String,
+    pub firmware_label: Option<String>,
+    pub fleet_id: Option<String>,
+    pub fleet_name: Option<String>,
+    pub canary_pct: i64,
+    pub status: String,
+    pub total: i64,
+    pub updated: i64,
+    pub created_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Command {
     pub id: String,
     pub device_id: String,

@@ -108,6 +108,41 @@ pub struct Alert {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfigProfile {
+    pub id: String,
+    pub name: String,
+    pub values: serde_json::Value,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Firmware {
+    pub id: String,
+    pub model: String,
+    pub version: String,
+    pub size_kb: i64,
+    pub sha256: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtaCampaign {
+    pub id: String,
+    pub firmware_id: String,
+    pub firmware_label: Option<String>,
+    pub fleet_id: Option<String>,
+    pub fleet_name: Option<String>,
+    pub canary_pct: i64,
+    pub status: String,
+    pub total: i64,
+    pub updated: i64,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Command {
     pub id: String,
     pub device_id: String,
@@ -200,4 +235,36 @@ pub async fn commands() -> Result<Vec<Command>, String> {
 
 pub async fn send_command(device: &str, name: &str) -> Result<serde_json::Value, String> {
     post_json(&format!("/api/devices/{device}/command"), &serde_json::json!({ "name": name })).await
+}
+
+pub async fn config_profiles() -> Result<Vec<ConfigProfile>, String> {
+    get_json("/api/config-profiles").await
+}
+
+pub async fn create_profile(name: &str, values: serde_json::Value) -> Result<serde_json::Value, String> {
+    post_json("/api/config-profiles", &serde_json::json!({ "name": name, "values": values })).await
+}
+
+pub async fn apply_profile(id: &str, device: &str) -> Result<serde_json::Value, String> {
+    post_json(&format!("/api/config-profiles/{id}/apply"), &serde_json::json!({ "device_id": device })).await
+}
+
+pub async fn firmware() -> Result<Vec<Firmware>, String> {
+    get_json("/api/firmware").await
+}
+
+pub async fn create_firmware(model: &str, version: &str) -> Result<serde_json::Value, String> {
+    post_json("/api/firmware", &serde_json::json!({ "model": model, "version": version })).await
+}
+
+pub async fn campaigns() -> Result<Vec<OtaCampaign>, String> {
+    get_json("/api/ota").await
+}
+
+pub async fn fleets() -> Result<Vec<Fleet>, String> {
+    get_json("/api/fleets").await
+}
+
+pub async fn create_campaign(firmware: &str, fleet: Option<String>, canary: i64) -> Result<serde_json::Value, String> {
+    post_json("/api/ota", &serde_json::json!({ "firmware_id": firmware, "fleet_id": fleet, "canary_pct": canary })).await
 }

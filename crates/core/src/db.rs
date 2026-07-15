@@ -11,7 +11,9 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use crate::models::{Alert, Command, Device, DeviceDetail, Fleet, LogEntry};
+use crate::models::{
+    Alert, Command, ConfigProfile, Device, DeviceDetail, Firmware, Fleet, LogEntry, OtaCampaign,
+};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS settings (
@@ -81,6 +83,31 @@ CREATE TABLE IF NOT EXISTS commands (
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_commands_device ON commands(device_id);
+CREATE TABLE IF NOT EXISTS config_profiles (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS firmware (
+    id         TEXT PRIMARY KEY,
+    model      TEXT NOT NULL,
+    version    TEXT NOT NULL,
+    size_kb    INTEGER NOT NULL DEFAULT 0,
+    sha256     TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ota_campaigns (
+    id           TEXT PRIMARY KEY,
+    firmware_id  TEXT NOT NULL,
+    fleet_id     TEXT,
+    canary_pct   INTEGER NOT NULL DEFAULT 100,
+    status       TEXT NOT NULL DEFAULT 'running',
+    total        INTEGER NOT NULL DEFAULT 0,
+    updated      INTEGER NOT NULL DEFAULT 0,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
 ";
 
 #[derive(Clone)]
@@ -480,6 +507,108 @@ impl Db {
     pub fn device_exists(&self, id: &str) -> bool {
         self.with(|c| c.query_row("SELECT 1 FROM devices WHERE id=?1", [id], |_| Ok(())))
             .is_ok()
+    }
+
+    // ---- Config profiles ----------------------------------------------------
+
+    pub fn list_config_profiles(&self) -> Vec<ConfigProfile> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT id,name,body,created_at FROM config_profiles ORDER BY name")?;
+            let rows = stmt.query_map([], |r| {
+                let values: String = r.get(2)?;
+                Ok(ConfigProfile {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    values: serde_json::from_str(&values).unwrap_or_else(|_| serde_json::json!({})),
+                    created_at: r.get(3)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<ConfigProfile>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn create_config_profile(&self, id: &str, name: &str, values: &str, now: i64) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute("INSERT INTO config_profiles(id,name,body,created_at) VALUES(?1,?2,?3,?4)", rusqlite::params![id, name, values, now]).map(|_| ())
+        })
+    }
+
+    pub fn delete_config_profile(&self, id: &str) -> rusqlite::Result<usize> {
+        self.with(|c| c.execute("DELETE FROM config_profiles WHERE id=?1", [id]))
+    }
+
+    pub fn config_profile_values(&self, id: &str) -> Option<String> {
+        self.with(|c| c.query_row("SELECT body FROM config_profiles WHERE id=?1", [id], |r| r.get(0))).ok()
+    }
+
+    // ---- Firmware + OTA -----------------------------------------------------
+
+    pub fn list_firmware(&self) -> Vec<Firmware> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT id,model,version,size_kb,sha256,created_at FROM firmware ORDER BY created_at DESC")?;
+            let rows = stmt.query_map([], |r| {
+                Ok(Firmware { id: r.get(0)?, model: r.get(1)?, version: r.get(2)?, size_kb: r.get(3)?, sha256: r.get(4)?, created_at: r.get(5)? })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<Firmware>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn create_firmware(&self, id: &str, model: &str, version: &str, size_kb: i64, sha256: &str, now: i64) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute("INSERT INTO firmware(id,model,version,size_kb,sha256,created_at) VALUES(?1,?2,?3,?4,?5,?6)", rusqlite::params![id, model, version, size_kb, sha256, now]).map(|_| ())
+        })
+    }
+
+    pub fn delete_firmware(&self, id: &str) -> rusqlite::Result<usize> {
+        self.with(|c| c.execute("DELETE FROM firmware WHERE id=?1", [id]))
+    }
+
+    pub fn list_campaigns(&self) -> Vec<OtaCampaign> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT o.id,o.firmware_id, f.model||' '||f.version, o.fleet_id, fl.name,
+                        o.canary_pct,o.status,o.total,o.updated,o.created_at
+                 FROM ota_campaigns o
+                 LEFT JOIN firmware f ON f.id = o.firmware_id
+                 LEFT JOIN fleets fl ON fl.id = o.fleet_id
+                 ORDER BY o.created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(OtaCampaign {
+                    id: r.get(0)?,
+                    firmware_id: r.get(1)?,
+                    firmware_label: r.get(2)?,
+                    fleet_id: r.get(3)?,
+                    fleet_name: r.get(4)?,
+                    canary_pct: r.get(5)?,
+                    status: r.get(6)?,
+                    total: r.get(7)?,
+                    updated: r.get(8)?,
+                    created_at: r.get(9)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<OtaCampaign>>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn create_campaign(&self, id: &str, firmware: &str, fleet: Option<&str>, canary: i64, total: i64, now: i64) -> rusqlite::Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO ota_campaigns(id,firmware_id,fleet_id,canary_pct,status,total,updated,created_at,updated_at)
+                 VALUES(?1,?2,?3,?4,'running',?5,0,?6,?6)",
+                rusqlite::params![id, firmware, fleet, canary, total, now],
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// Advance running OTA campaigns one device at a time, completing when done.
+    pub fn advance_campaigns(&self, now: i64) {
+        let _ = self.with(|c| c.execute("UPDATE ota_campaigns SET updated=MIN(total, updated+1), updated_at=?1 WHERE status='running' AND updated<total", [now]));
+        let _ = self.with(|c| c.execute("UPDATE ota_campaigns SET status='completed', updated_at=?1 WHERE status='running' AND updated>=total AND total>0", [now]));
     }
 }
 

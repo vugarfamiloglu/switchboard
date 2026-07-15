@@ -140,6 +140,8 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
                         <Route path=path!("/alerts") view=Alerts/>
                         <Route path=path!("/logs") view=Logs/>
                         <Route path=path!("/commands") view=Commands/>
+                        <Route path=path!("/config") view=Config/>
+                        <Route path=path!("/firmware") view=Firmware/>
                     </Routes>
                 </main>
             </div>
@@ -150,7 +152,7 @@ fn Shell(theme: ReadSignal<String>, set_theme: WriteSignal<String>) -> impl Into
 const NAV: &[(&str, &[(&str, &str, &str)])] = &[
     ("Operations", &[("Overview", "OV", "/"), ("Fleet Map", "MP", "#")]),
     ("Fleet", &[("Devices", "DV", "/devices"), ("Fleets", "FL", "#")]),
-    ("Delivery", &[("Config", "CF", "#"), ("Firmware", "FW", "#"), ("Commands", "CM", "/commands")]),
+    ("Delivery", &[("Config", "CF", "/config"), ("Firmware", "FW", "/firmware"), ("Commands", "CM", "/commands")]),
     ("Observe", &[("Logs", "LG", "/logs"), ("Rules", "RL", "#"), ("Alerts", "AL", "/alerts")]),
     ("Insights", &[("Analytics", "AN", "#")]),
     ("Admin", &[("Team", "TM", "#"), ("Settings", "ST", "#")]),
@@ -405,6 +407,238 @@ fn DeviceDetail() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[component]
+fn Config() -> impl IntoView {
+    let auth = use_auth();
+    let profiles = RwSignal::new(Vec::<api::ConfigProfile>::new());
+    let devices = RwSignal::new(Vec::<Device>::new());
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(p) = api::config_profiles().await {
+                profiles.set(p);
+            }
+        });
+    };
+    reload();
+    spawn_local(async move {
+        if let Ok(d) = api::devices().await {
+            devices.set(d);
+        }
+    });
+    let (name, set_name) = signal(String::new());
+    let (vals, set_vals) = signal(String::from("{ \"reportInterval\": 30 }"));
+    let (msg, set_msg) = signal(String::new());
+    let (apply_dev, set_apply_dev) = signal(String::new());
+    let can_write = move || auth.role.get() != "viewer";
+
+    let create = move |_| {
+        let n = name.get();
+        if n.trim().is_empty() {
+            set_msg.set("Name is required".into());
+            return;
+        }
+        let v = match serde_json::from_str::<serde_json::Value>(&vals.get()) {
+            Ok(v) => v,
+            Err(e) => {
+                set_msg.set(format!("Invalid JSON: {e}"));
+                return;
+            }
+        };
+        set_msg.set(String::new());
+        spawn_local(async move {
+            let _ = api::create_profile(&n, v).await;
+            set_name.set(String::new());
+            reload();
+        });
+    };
+    let apply = move |pid: String| {
+        let dev = apply_dev.get();
+        if dev.is_empty() {
+            set_msg.set("Pick an apply target first".into());
+            return;
+        }
+        spawn_local(async move {
+            match api::apply_profile(&pid, &dev).await {
+                Ok(_) => set_msg.set("Profile pushed to the device twin".into()),
+                Err(e) => set_msg.set(e),
+            }
+        });
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Config profiles"</h1>
+            <p class="page-desc">"Reusable desired-state you can push to a device twin."</p>
+        </div></div>
+        {move || can_write().then(|| view! {
+            <div class="panel section-block">
+                <div class="panel-title">"New profile"</div>
+                <div class="form-row"><input class="input mono" placeholder="Profile name" prop:value=move || name.get() on:input=move |e| set_name.set(event_target_value(&e))/></div>
+                <textarea class="input mono cfg-json" prop:value=move || vals.get() on:input=move |e| set_vals.set(event_target_value(&e))></textarea>
+                <div class="form-row cfg-actions">
+                    <button class="btn btn-primary btn-inline" on:click=create>"Create profile"</button>
+                    <select class="lvl-select mono" on:change=move |e| set_apply_dev.set(event_target_value(&e))>
+                        <option value="">"apply target…"</option>
+                        {move || devices.get().into_iter().map(|d| view! { <option value=d.id.clone()>{d.name.clone()}</option> }).collect_view()}
+                    </select>
+                </div>
+                {move || (!msg.get().is_empty()).then(|| view! { <div class="cfg-msg mono">{msg.get()}</div> })}
+            </div>
+        })}
+        <div class="cfg-grid">
+            {move || profiles.get().into_iter().map(|p| {
+                let pid = p.id.clone();
+                let can = can_write();
+                view! {
+                    <div class="cfg-card">
+                        <div class="cfg-name">{p.name.clone()}</div>
+                        <pre class="cfg-vals mono">{serde_json::to_string_pretty(&p.values).unwrap_or_default()}</pre>
+                        {can.then(|| { let pid = pid.clone(); view! { <button class="mini-btn" on:click=move |_| apply(pid.clone())>"Apply to target"</button> } })}
+                    </div>
+                }
+            }).collect_view()}
+        </div>
+    }
+}
+
+#[component]
+fn Firmware() -> impl IntoView {
+    let auth = use_auth();
+    let fw = RwSignal::new(Vec::<api::Firmware>::new());
+    let camps = RwSignal::new(Vec::<api::OtaCampaign>::new());
+    let fleets = RwSignal::new(Vec::<api::Fleet>::new());
+    let reload = move || {
+        spawn_local(async move { if let Ok(f) = api::firmware().await { fw.set(f); } });
+        spawn_local(async move { if let Ok(c) = api::campaigns().await { camps.set(c); } });
+    };
+    reload();
+    spawn_local(async move { if let Ok(f) = api::fleets().await { fleets.set(f); } });
+
+    // Poll campaign progress while mounted.
+    let alive = RwSignal::new(true);
+    on_cleanup(move || alive.set(false));
+    spawn_local(async move {
+        while alive.get_untracked() {
+            gloo_timers::future::TimeoutFuture::new(2000).await;
+            if !alive.get_untracked() {
+                break;
+            }
+            reload();
+        }
+    });
+
+    let (model, set_model) = signal(String::new());
+    let (version, set_version) = signal(String::new());
+    let (sel_fw, set_sel_fw) = signal(String::new());
+    let (sel_fleet, set_sel_fleet) = signal(String::new());
+    let (canary, set_canary) = signal(100_i64);
+    let can_write = move || auth.role.get() != "viewer";
+
+    let register = move |_| {
+        let (m, v) = (model.get(), version.get());
+        if m.trim().is_empty() || v.trim().is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            let _ = api::create_firmware(&m, &v).await;
+            set_model.set(String::new());
+            set_version.set(String::new());
+            reload();
+        });
+    };
+    let start = move |_| {
+        let f = sel_fw.get();
+        if f.is_empty() {
+            return;
+        }
+        let fleet = {
+            let s = sel_fleet.get();
+            if s.is_empty() { None } else { Some(s) }
+        };
+        let cn = canary.get();
+        spawn_local(async move {
+            let _ = api::create_campaign(&f, fleet, cn).await;
+            reload();
+        });
+    };
+
+    view! {
+        <div class="page-head"><div>
+            <h1 class="page-title">"Firmware & OTA"</h1>
+            <p class="page-desc">"Register firmware artifacts and roll them out with canary campaigns."</p>
+        </div></div>
+        {move || can_write().then(|| view! {
+            <div class="panel section-block">
+                <div class="panel-title">"Register firmware"</div>
+                <div class="form-row cfg-actions">
+                    <input class="input mono" placeholder="Model (e.g. AeroTherm X3)" prop:value=move || model.get() on:input=move |e| set_model.set(event_target_value(&e))/>
+                    <input class="input mono" placeholder="Version (e.g. 2.5.0)" prop:value=move || version.get() on:input=move |e| set_version.set(event_target_value(&e))/>
+                    <button class="btn btn-primary btn-inline" on:click=register>"Register"</button>
+                </div>
+                <div class="panel-title" style="margin-top:18px">"Start rollout"</div>
+                <div class="form-row cfg-actions">
+                    <select class="lvl-select mono" on:change=move |e| set_sel_fw.set(event_target_value(&e))>
+                        <option value="">"firmware…"</option>
+                        {move || fw.get().into_iter().map(|f| view! { <option value=f.id.clone()>{format!("{} {}", f.model, f.version)}</option> }).collect_view()}
+                    </select>
+                    <select class="lvl-select mono" on:change=move |e| set_sel_fleet.set(event_target_value(&e))>
+                        <option value="">"all fleets"</option>
+                        {move || fleets.get().into_iter().map(|f| view! { <option value=f.id.clone()>{f.name.clone()}</option> }).collect_view()}
+                    </select>
+                    <select class="lvl-select mono" on:change=move |e| set_canary.set(event_target_value(&e).parse().unwrap_or(100))>
+                        <option value="100">"100% (all)"</option>
+                        <option value="50">"50% canary"</option>
+                        <option value="25">"25% canary"</option>
+                        <option value="10">"10% canary"</option>
+                    </select>
+                    <button class="btn btn-primary btn-inline" on:click=start>"Start rollout"</button>
+                </div>
+            </div>
+        })}
+
+        <section class="panel section-block">
+            <div class="panel-head"><div class="panel-title">"Rollouts"</div></div>
+            <div class="ota-list">
+                {move || {
+                    let items = camps.get();
+                    if items.is_empty() {
+                        return view! { <div class="empty">"No rollouts yet."</div> }.into_any();
+                    }
+                    items.into_iter().map(|c| {
+                        let pct = if c.total > 0 { (c.updated * 100 / c.total).min(100) } else { 0 };
+                        view! {
+                            <div class="ota-row">
+                                <div class="ota-head">
+                                    <span class="ota-fw">{c.firmware_label.clone().unwrap_or_else(|| "firmware".into())}</span>
+                                    <span class="ota-fleet mono">{c.fleet_name.clone().unwrap_or_else(|| "all fleets".into())}" · "{c.canary_pct}"%"</span>
+                                    <span class=format!("pill pill-state-{}", if c.status == "completed" { "resolved" } else { "acked" })>{c.status.clone()}</span>
+                                </div>
+                                <div class="ota-bar"><div class="ota-fill" style=format!("width:{}%", pct)></div></div>
+                                <div class="ota-meta mono">{c.updated}" / "{c.total}" devices"</div>
+                            </div>
+                        }
+                    }).collect_view().into_any()
+                }}
+            </div>
+        </section>
+
+        <section class="panel section-block">
+            <div class="panel-head"><div class="panel-title">"Firmware registry"</div></div>
+            <div class="dtable">
+                <div class="dt-head mono fw-cols"><span>"MODEL"</span><span>"VERSION"</span><span>"SIZE"</span><span>"SHA-256"</span></div>
+                {move || fw.get().into_iter().map(|f| view! {
+                    <div class="dt-row fw-cols" style="cursor:default">
+                        <span class="cell-strong">{f.model.clone()}</span>
+                        <span class="mono">{f.version.clone()}</span>
+                        <span class="mono u-muted">{format!("{} KB", f.size_kb)}</span>
+                        <span class="mono u-muted">{f.sha256.clone()}</span>
+                    </div>
+                }).collect_view()}
+            </div>
+        </section>
     }
 }
 

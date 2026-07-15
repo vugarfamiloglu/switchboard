@@ -266,6 +266,9 @@ impl Sim {
                 let _ = self.db.complete_command(&id, status, &result, ts);
             }
 
+            // Advance any running OTA rollouts one device at a time.
+            self.db.advance_campaigns(ts);
+
             if tick_no % TOUCH_EVERY == 0 {
                 for s in sims.iter().filter(|s| s.online) {
                     let reported = serde_json::to_string(&s.metrics).unwrap_or_else(|_| "{}".into());

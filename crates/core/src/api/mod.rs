@@ -4,6 +4,7 @@
 pub mod alerts;
 pub mod auth;
 pub mod commands;
+pub mod delivery;
 pub mod devices;
 pub mod fleets;
 pub mod logs;
@@ -103,6 +104,12 @@ pub fn routes(state: AppState) -> Router {
         .route("/logs", get(logs::list))
         .route("/commands", get(commands::list))
         .route("/devices/{id}/command", post(commands::send))
+        .route("/config-profiles", get(delivery::list_profiles).post(delivery::create_profile))
+        .route("/config-profiles/{id}", delete(delivery::delete_profile))
+        .route("/config-profiles/{id}/apply", post(delivery::apply_profile))
+        .route("/firmware", get(delivery::list_firmware).post(delivery::create_firmware))
+        .route("/firmware/{id}", delete(delivery::delete_firmware))
+        .route("/ota", get(delivery::list_campaigns).post(delivery::create_campaign))
         .layer(axum::middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
